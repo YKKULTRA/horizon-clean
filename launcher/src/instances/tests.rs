@@ -209,9 +209,9 @@ fn an_instance_follows_the_players_answers() {
         fs::read_to_string(own.join("horizon-player.txt")).unwrap(),
         "name:Player123\n"
     );
-    assert_eq!(
-        fs::read_to_string(own.join("telemetry/consent.json")).unwrap(),
-        r#"{"version":1}"#
+    assert!(
+        !own.join("telemetry").exists(),
+        "telemetry consent is never propagated"
     );
     assert!(horizon_core::no_ai::is_on(&own));
     horizon_core::no_ai::set(&main, false).unwrap();

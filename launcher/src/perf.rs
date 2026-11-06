@@ -1,11 +1,5 @@
-//! The launcher's own measurements, in the benchmark report format (docs/benchmark-report.md):
-//! start to the first frame, the release list fetch, installs and preparing, Play to the game's
-//! first frame, its memory, UI frame times and size. Each session rewrites one report in
-//! `benchmarks/` of the launcher's data folder, a local log the player can attach to an issue;
-//! nothing leaves the machine (an upload needs the telemetry consent).
-//!
-//! `horizon-launcher benchmark` measures the same things on purpose: several starts (the first is
-//! the cold one), page switching, repeated release list fetches, idle CPU.
+//! Local measurements only for an explicitly requested `horizon-launcher benchmark`.
+//! Ordinary launches do not probe hardware, aggregate metrics or write benchmark files.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -36,6 +30,7 @@ pub struct Perf {
     dirty: bool,
     /// Off for the windows `horizon-launcher benchmark` starts: they report to it instead.
     log: bool,
+    enabled: bool,
     /// Machine probes run after the first frame, never while opening the window.
     hardware: Option<Receiver<Machine>>,
 }
@@ -59,6 +54,10 @@ impl Machine {
 
 impl Perf {
     pub fn new(scenario: &str) -> Perf {
+        Self::with_collection(scenario, Bench::wanted())
+    }
+
+    fn with_collection(scenario: &str, enabled: bool) -> Perf {
         let hardware = Hardware {
             os: std::env::consts::OS.to_owned(),
             arch: std::env::consts::ARCH.to_owned(),
@@ -83,7 +82,8 @@ impl Perf {
             ui_frames: Vec::new(),
             saved: Instant::now(),
             dirty: false,
-            log: true,
+            log: false,
+            enabled,
             hardware: None,
         };
         if let Some(bytes) = binary_bytes() {
@@ -98,6 +98,9 @@ impl Perf {
 
     /// One more value of a measurement; the report keeps their summary.
     pub fn record(&mut self, name: &str, value: f64) {
+        if !self.enabled {
+            return;
+        }
         self.values.entry(name.to_owned()).or_default().push(value);
         self.dirty = true;
     }
@@ -110,6 +113,10 @@ impl Perf {
     pub fn frame(&mut self) -> bool {
         let now = Instant::now();
         let first = self.first_frame.is_none();
+        if !self.enabled {
+            self.first_frame.get_or_insert(now);
+            return first;
+        }
         if first {
             self.first_frame = Some(now);
             self.record_since("launcher.start_ms", process_started());
@@ -132,6 +139,9 @@ impl Perf {
 
     /// Samples memory and writes the report when something changed, at most every few seconds.
     pub fn tick(&mut self) {
+        if !self.enabled {
+            return;
+        }
         self.poll_hardware();
         if self.saved.elapsed() < Duration::from_secs(5) {
             return;
@@ -180,7 +190,7 @@ impl Perf {
 
     pub fn save(&mut self) {
         self.dirty = false;
-        if !self.log {
+        if !self.enabled || !self.log {
             return;
         }
         let json = self.report().to_json();
@@ -406,15 +416,6 @@ pub fn benchmark(repeats: usize) -> Result<PathBuf, String> {
     if let Some(bytes) = binary_bytes() {
         report.metric("launcher.binary_bytes", &[bytes]);
     }
-    // Kept for upload only if the player allows benchmark uploads (the outbox checks).
-    if let Ok(data) = serde_json::to_value(report.for_upload()) {
-        let item = horizon_telemetry::Item::new(
-            horizon_telemetry::Source::Launcher,
-            crate::backend::VERSION,
-            horizon_telemetry::Payload::Benchmark(data),
-        );
-        let _ = horizon_telemetry::outbox::push(&crate::backend::game_home(), &item);
-    }
     report
         .write_to(&crate::backend::data_dir().join("benchmarks"))
         .map_err(|e| e.to_string())
@@ -436,9 +437,33 @@ fn binary_bytes() -> Option<f64> {
 mod tests {
     use super::*;
 
+    fn measured() -> Perf {
+        Perf::with_collection("test", true)
+    }
+
+    #[test]
+    fn ordinary_start_does_not_collect_or_write_benchmarks() {
+        let mut perf = Perf::with_collection("session", false);
+        let path = std::env::temp_dir().join(format!(
+            "horizon-clean-no-benchmark-{}.json",
+            std::process::id()
+        ));
+        perf.path = path.clone();
+        perf.keep_local_log(true);
+        assert!(perf.frame());
+        assert!(!perf.frame());
+        perf.record("test", 123.0);
+        perf.tick();
+        perf.save();
+        assert!(perf.hardware.is_none());
+        assert!(perf.values.is_empty());
+        assert!(perf.ui_frames.is_empty());
+        assert!(!path.exists());
+    }
+
     #[test]
     fn performance_tracking_starts_without_hardware_probes() {
-        let mut perf = Perf::new("test");
+        let mut perf = measured();
         perf.keep_local_log(false);
         assert!(perf.hardware.is_none());
         assert_eq!(perf.report.hardware.os, std::env::consts::OS);
@@ -448,7 +473,7 @@ mod tests {
 
     #[test]
     fn background_hardware_details_preserve_recorded_metrics() {
-        let mut perf = Perf::new("test");
+        let mut perf = measured();
         perf.keep_local_log(false);
         perf.record("launcher.start_ms", 125.);
         let (sender, receiver) = mpsc::channel();
@@ -473,7 +498,7 @@ mod tests {
 
     #[test]
     fn the_first_frame_is_the_start_and_close_frames_are_ui_frames() {
-        let mut perf = Perf::new("test");
+        let mut perf = measured();
         perf.keep_local_log(false);
         assert!(perf.frame(), "the first frame");
         assert!(!perf.frame());
@@ -495,7 +520,7 @@ mod tests {
 
     #[test]
     fn a_bench_window_waits_for_its_first_frame_then_switches_pages() {
-        let mut perf = Perf::new("test");
+        let mut perf = measured();
         perf.keep_local_log(false);
         let mut bench = Bench {
             out: std::env::temp_dir().join("unused"),

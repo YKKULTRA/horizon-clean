@@ -38,12 +38,6 @@ impl Launcher {
         if self.multiplayer.fresh {
             return;
         }
-        // A list that can't be read is the game's to report: the page shows it empty.
-        let _ = server_list::add_official(
-            &home,
-            &self.links.official_server,
-            &self.links.official_server_previous,
-        );
         // A few servers and their 64×64 pictures: small enough to read while drawing.
         self.multiplayer.list = server_list::List::load(&home)
             .servers()

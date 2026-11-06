@@ -477,13 +477,10 @@ impl Default for Links {
     fn default() -> Self {
         Self {
             discord: "https://discord.gg/playhorizon".into(),
-            sponsor: "https://github.com/sponsors/ludovic111".into(),
-            website: "https://playhorizon.dev".into(),
-            official_server: crate::server_list::OFFICIAL_ADDRESS.into(),
-            official_server_previous: crate::server_list::OFFICIAL_PREVIOUS
-                .iter()
-                .map(|a| a.to_string())
-                .collect(),
+            sponsor: String::new(),
+            website: "https://github.com/horizon-rust/horizon".into(),
+            official_server: String::new(),
+            official_server_previous: Vec::new(),
         }
     }
 }
@@ -520,13 +517,9 @@ impl Links {
     }
 }
 
-/// The links from main, or the built-in ones when offline.
+/// Static links only. Upstream cannot change this fork's links remotely.
 pub fn links() -> Links {
-    let url = format!("https://raw.githubusercontent.com/{REPO}/main/launcher/links.json");
-    get(&url)
-        .ok()
-        .and_then(|r| r.into_string().ok())
-        .map_or_else(Links::default, |text| Links::parse(&text))
+    Links::parse(include_str!("../links.json"))
 }
 
 /// The launcher's data folder; `HORIZON_LAUNCHER_HOME` overrides it (for tests and scripts).
@@ -665,6 +658,16 @@ fn installed_in(versions: &Path) -> Vec<String> {
         .collect();
     tags.sort_by(|a, b| compare_versions(b, a));
     tags
+}
+
+/// Locally installed builds without a GitHub lookup. Clean builds stay usable offline.
+pub fn local_releases() -> Vec<Release> {
+    installed().into_iter().map(|tag| Release {
+        name: format!("Local build {tag}"),
+        tag,
+        body: "Installed locally. This fork does not poll for or automatically install upstream updates.".into(),
+        date: String::new(), asset: None, prerelease: false, nightly: None,
+    }).collect()
 }
 
 /// A small release file (its checksums or their signature), whole; None when it has none.
@@ -2692,7 +2695,7 @@ fn launcher_asset_running_from(appimage: bool) -> Option<&'static str> {
 
 /// Development builds and `HORIZON_LAUNCHER_NO_SELF_UPDATE` never replace themselves.
 pub fn self_update_allowed() -> bool {
-    !cfg!(debug_assertions) && std::env::var_os("HORIZON_LAUNCHER_NO_SELF_UPDATE").is_none()
+    false
 }
 
 /// The version in `horizon-launcher --version`'s output (`horizon-launcher 0.1.5`).
@@ -2864,6 +2867,12 @@ fn replace_bundle(_new: &Path, _app: &Path) -> Result<(), String> {
 /// working; `restart` starts the new one. When the file there already is that release or
 /// a newer one (updated from the command line or another window), there is nothing to do.
 pub fn self_update(release: &Release, progress: impl Fn(f32)) -> Result<(), String> {
+    if !self_update_allowed() {
+        return Err(
+            "Upstream self-updates are disabled in this fork. Rebuild the cleaned source instead."
+                .into(),
+        );
+    }
     let (url, size) = release
         .asset
         .clone()
@@ -3074,11 +3083,6 @@ pub enum Msg {
     PackLine(String),
     /// A modpack step ended: the pack as it now is.
     PackDone(Result<Box<crate::modpacks::Imported>, String>),
-    /// How many play Horizon now, or none when the server can't be reached (`telemetry`).
-    Playing(Option<u64>),
-    /// How many play on the official server now, or none when it doesn't answer its status ping
-    /// (`telemetry::watch_official`).
-    OfficialPlayers(Option<u64>),
     /// Where the native-mods build is (`native_mods::Step::label`).
     NativeProgress(String),
     /// The native-mods build ended: the version built, or why not.
@@ -3342,7 +3346,7 @@ impl Settings {
     }
     /// Whether new Horizon versions are installed automatically.
     pub fn auto_install(&self) -> bool {
-        self.install_new_versions.unwrap_or(true)
+        false
     }
     /// Whether old versions are deleted after an install.
     pub fn auto_prune(&self) -> bool {
@@ -4356,33 +4360,24 @@ pub fn {f}("
     }
 
     #[test]
-    fn new_versions_install_automatically_unless_turned_off() {
-        // No settings file, an old one that never mentioned it, and 0.1.1's default `false`.
-        assert!(Settings::parse("").auto_install());
-        assert!(Settings::parse("{}").auto_install());
-        assert!(
-            Settings::parse(r#"{"selected": "v2026.10.13", "auto_install": false}"#).auto_install()
-        );
-        assert!(Settings::parse(r#"{"install_new_versions": true}"#).auto_install());
-        assert!(!Settings::parse(r#"{"install_new_versions": false}"#).auto_install());
-        // Saving after the player turned it off keeps it off.
-        let off = Settings {
-            install_new_versions: Some(false),
-            ..Settings::default()
-        };
-        assert!(!Settings::parse(&serde_json::to_string(&off).unwrap()).auto_install());
-        // The selection rule is unchanged: the new version is selected only from the newest.
-        let installed = ["v2026.10.12".to_string(), "v2026.10.1".to_string()];
-        assert!(select_after_update(Some("v2026.10.12"), &installed));
-        assert!(!select_after_update(Some("v2026.10.1"), &installed));
+    fn old_settings_cannot_restore_automatic_upstream_installs() {
+        for settings in [
+            "",
+            "{}",
+            r#"{"install_new_versions":true}"#,
+            r#"{"auto_install":true}"#,
+        ] {
+            assert!(!Settings::parse(settings).auto_install());
+        }
+        assert!(!self_update_allowed());
     }
 
     #[test]
     fn links_fall_back_to_the_built_in_ones() {
         let defaults = Links::default();
         assert_eq!(defaults.discord, "https://discord.gg/playhorizon");
-        assert_eq!(defaults.sponsor, "https://github.com/sponsors/ludovic111");
-        assert_eq!(defaults.website, "https://playhorizon.dev");
+        assert!(defaults.sponsor.is_empty());
+        assert_eq!(defaults.website, "https://github.com/horizon-rust/horizon");
         // The file on main says the same thing as the defaults.
         assert_eq!(Links::parse(include_str!("../links.json")), defaults);
         // Unreadable or missing, offline included: the defaults.

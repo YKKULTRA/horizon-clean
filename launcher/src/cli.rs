@@ -1061,7 +1061,7 @@ fn settings_json(s: &backend::Settings) -> serde_json::Value {
         "selected_version": backend::resolve_version(None).ok(),
         "minecraft_dir": s.minecraft_dir,
         "server_dir": backend::server_dir(None),
-        "install_new_versions": s.install_new_versions.unwrap_or(true),
+        "install_new_versions": s.auto_install(),
         "prune_old_versions": s.auto_prune(),
         "keep_versions": s.keep_newest(),
         "opening_animation": !s.skip_opening,
@@ -1969,79 +1969,21 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// `data`: the same consent as Settings → Data collection.
+/// This command remains for scripts; collection cannot be switched back on.
 fn data(action: DataCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::telemetry;
-    let review = |item: &horizon_telemetry::Item, yes: bool| -> Result<bool, String> {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(item).map_err(|e| e.to_string())?
-        );
-        if yes {
-            return Ok(true);
-        }
-        if !std::io::stdin().is_terminal() {
-            return Err("Add --yes to send it without asking.".into());
-        }
-        eprint!("Send this? [y/N] ");
-        let mut line = String::new();
-        std::io::stdin()
-            .read_line(&mut line)
-            .map_err(|e| e.to_string())?;
-        Ok(line.trim().eq_ignore_ascii_case("y"))
-    };
     match action {
-        DataCmd::Status => {
-            let status = telemetry::status_json();
+        DataCmd::Status | DataCmd::Show | DataCmd::Deny { .. } => {
             if as_json {
-                json(status);
-                return Ok(());
+                json(
+                    serde_json::json!({"enabled": false, "removed": true, "waiting": 0, "server": null}),
+                );
+            } else {
+                println!("Telemetry, crash uploads and player pings were removed from this build.");
             }
-            let consent = telemetry::consent();
-            if consent.needs_asking() {
-                println!("Not answered yet: nothing is collected.");
-            }
-            for (kind, name, _) in telemetry::SWITCHES {
-                let on = consent.allows(kind);
-                println!("{name}: {}", if on { "on" } else { "off" });
-            }
-            println!("Waiting to be sent: {}", status["waiting"]);
-            match horizon_telemetry::endpoint() {
-                Some(url) => println!("Server: {url}"),
-                None => println!("Server: turned off (HORIZON_TELEMETRY_URL=off), nothing is sent"),
-            }
+            Ok(())
         }
-        DataCmd::Allow { kinds } => {
-            telemetry::set(&telemetry::parse_kinds(&kinds)?, true)?;
-            return data(DataCmd::Status, as_json);
-        }
-        DataCmd::Deny { kinds } => {
-            telemetry::set(&telemetry::parse_kinds(&kinds)?, false)?;
-            return data(DataCmd::Status, as_json);
-        }
-        DataCmd::Show => {
-            let (what, text) = telemetry::preview();
-            eprintln!("{what}");
-            println!("{text}");
-        }
-        DataCmd::Delete => println!("{}", telemetry::delete_my_data()?),
-        DataCmd::Send => println!("{:?}", telemetry::send()),
-        DataCmd::Bug { text, log, yes } => {
-            telemetry::ensure_allowed(horizon_telemetry::Kind::Bug)?;
-            let item = telemetry::bug_report(&text, log)?;
-            if review(&item, yes)? {
-                println!("{}", telemetry::submit(&item)?);
-            }
-        }
-        DataCmd::Benchmark { file, yes } => {
-            telemetry::ensure_allowed(horizon_telemetry::Kind::Benchmark)?;
-            let item = telemetry::benchmark_report(&file)?;
-            if review(&item, yes)? {
-                println!("{}", telemetry::submit(&item)?);
-            }
-        }
+        _ => Err("Telemetry was removed from this build; nothing can be collected or sent.".into()),
     }
-    Ok(())
 }
 
 fn servers(action: ServersCmd, as_json: bool) -> Result<(), String> {

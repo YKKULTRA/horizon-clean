@@ -10,7 +10,6 @@ impl Launcher {
     pub(crate) fn asking_owner(&self) -> bool {
         (self.owner_shown() == Some(false) || sign_in_preview())
             && (self.owner_screen_open || !self.settings.owner_notice_seen || sign_in_preview())
-            && !self.asking_consent()
             && self.opening.is_none()
     }
 

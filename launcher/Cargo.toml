@@ -41,8 +41,6 @@ horizon-port-pack = { path = "../crates/horizon-port-pack" }
 horizon-mods = { path = "../crates/horizon-mods", features = ["index"] }
 # Signed updates: archives are checked against the release's signed checksums (docs/security.md).
 horizon-release-sign = { path = "../crates/horizon-release-sign" }
-# Opt-in data collection: the consent, the outbox and its upload (docs/telemetry.md).
-horizon-telemetry = { path = "../crates/horizon-telemetry" }
 # The official server's count follows its SRV record, as the game does (server_redirect).
 horizon-protocol = { path = "../crates/horizon-protocol" }
 # level.dat and servers.dat (the worlds and server lists of instances)
@@ -82,6 +80,7 @@ keyring = { version = "3", features = ["windows-native"] }
 winresource = "0.1"
 
 [dev-dependencies]
+horizon-telemetry = { path = "../crates/horizon-telemetry", default-features = false }
 # Tokenize source strings for the translation completeness test, including multiline calls.
 proc-macro2 = "1"
 syn = "2"

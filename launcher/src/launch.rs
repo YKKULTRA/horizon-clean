@@ -381,7 +381,9 @@ pub fn plan(launch: &Launch, words: Vec<OsString>, windows: bool, found: &Found)
 
 /// The game's command run with `launch`: a new command with the same folder and variables,
 /// plus the instance's variables. Call it last, after every argument is added.
-pub fn wrap(cmd: Command, launch: &Launch) -> Command {
+pub fn wrap(mut cmd: Command, launch: &Launch) -> Command {
+    cmd.env("HORIZON_TELEMETRY_URL", "off")
+        .env("HORIZON_NO_HEARTBEAT", "1");
     if launch.is_empty() {
         return cmd;
     }
@@ -427,6 +429,8 @@ pub fn wrap(cmd: Command, launch: &Launch) -> Command {
     }
     out.envs(switch_env(launch, &found));
     out.envs(&launch.env);
+    out.env("HORIZON_TELEMETRY_URL", "off")
+        .env("HORIZON_NO_HEARTBEAT", "1");
     out
 }
 

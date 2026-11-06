@@ -143,14 +143,9 @@ fn a_server_without_a_name_gets_the_games_default() {
     );
 }
 
-/// The official server as the launcher knows it before links.json is read.
-fn add_official_default(home: &Path) -> Result<(), String> {
-    let links = Links::default();
-    add_official(
-        home,
-        &links.official_server,
-        &links.official_server_previous,
-    )
+/// Explicit legacy fixture, not this fork's empty defaults.
+fn add_official_fixture(home: &Path) -> Result<(), String> {
+    add_official(home, OFFICIAL_ADDRESS, &["horizon.bunchy7s.dev".into()])
 }
 
 fn ips(home: &Path) -> Vec<String> {
@@ -174,7 +169,7 @@ fn the_official_server_is_put_on_top_once() {
     let (name, address) = (OFFICIAL_NAME, OFFICIAL_ADDRESS);
     // A fresh list: just the official server.
     let home = scratch("official-fresh");
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(shown(&home), [(name.into(), address.into())]);
     assert_eq!(
         fs::read_to_string(home.join(OFFICIAL_MARKER)).unwrap(),
@@ -183,7 +178,7 @@ fn the_official_server_is_put_on_top_once() {
     // An existing list: on top of the shown ones, every entry and field kept.
     let home = scratch("official-existing");
     let before = entries_of(&vanilla_file(&home));
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(ips(&home), [address, "friends.example:25570"]);
     assert_eq!(
         entries(&home)[1..],
@@ -191,25 +186,25 @@ fn the_official_server_is_put_on_top_once() {
         "the player's entries stay as they were"
     );
     // Once only.
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(ips(&home), [address, "friends.example:25570"]);
     // Removed by the player: never back.
     let mut list = List::load(&home);
     list.remove(0).unwrap();
     list.save(&home).unwrap();
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(ips(&home), ["friends.example:25570"]);
     // Already there under the player's own name and spelling: not duplicated.
     let home = scratch("official-present");
     let mut list = List::load(&home);
     list.add("SMP", "Play.PlayHorizon.dev:25565").unwrap();
     list.save(&home).unwrap();
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(ips(&home), ["Play.PlayHorizon.dev:25565"]);
     // A list that can't be read is left alone, and offered again once it can be.
     let home = scratch("official-broken");
     fs::write(home.join(FILE), b"not nbt").unwrap();
-    assert!(add_official_default(&home).is_err());
+    assert!(add_official_fixture(&home).is_err());
     assert_eq!(fs::read(home.join(FILE)).unwrap(), b"not nbt");
     assert!(!home.join(OFFICIAL_MARKER).exists());
     // No official server in links.json: nothing offered, nothing written.
@@ -247,7 +242,7 @@ fn a_moved_official_server_moves_the_players_entry_once() {
     let mut list = List::load(&home);
     list.entries[1].insert(key("icon"), s("AAAA"));
     list.save(&home).unwrap();
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(
         shown(&home),
         [
@@ -262,13 +257,13 @@ fn a_moved_official_server_moves_the_players_entry_once() {
     );
     // Once: nothing changes on the next look, not even the file.
     let file = fs::read(home.join(FILE)).unwrap();
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(fs::read(home.join(FILE)).unwrap(), file);
     // An old address the player adds back after the move is theirs.
     let mut list = List::load(&home);
     list.add("Old", "horizon.bunchy7s.dev").unwrap();
     list.save(&home).unwrap();
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(ips(&home)[2], "horizon.bunchy7s.dev");
 
     // The new address already in the list: the old entry goes instead of making a second one.
@@ -281,7 +276,7 @@ fn a_moved_official_server_moves_the_players_entry_once() {
         ],
         "horizon.bunchy7s.dev",
     );
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(shown(&home), [("New".into(), new.into())]);
     // Two entries for the old address: one is kept, moved.
     let home = scratch("moved-twice");
@@ -293,7 +288,7 @@ fn a_moved_official_server_moves_the_players_entry_once() {
         ],
         "horizon.bunchy7s.dev",
     );
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(shown(&home), [("A".into(), new.into())]);
 
     // Removed by the player before the move: not offered again.
@@ -303,7 +298,7 @@ fn a_moved_official_server_moves_the_players_entry_once() {
         &[("Friends", "friends.example")],
         "horizon.bunchy7s.dev",
     );
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(ips(&home), ["friends.example"]);
     // Another port is another server: left alone.
     let home = scratch("moved-port");
@@ -312,14 +307,14 @@ fn a_moved_official_server_moves_the_players_entry_once() {
         &[("Test", "horizon.bunchy7s.dev:25570")],
         "horizon.bunchy7s.dev",
     );
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(ips(&home), ["horizon.bunchy7s.dev:25570"]);
     // A list that was never offered it but has the old address: moved, nothing added.
     let home = scratch("moved-unoffered");
     let mut list = List::load(&home);
     list.add("SMP", "horizon.bunchy7s.dev").unwrap();
     list.save(&home).unwrap();
-    add_official_default(&home).unwrap();
+    add_official_fixture(&home).unwrap();
     assert_eq!(shown(&home), [("SMP".into(), new.into())]);
 }
 
@@ -327,8 +322,8 @@ fn a_moved_official_server_moves_the_players_entry_once() {
 fn the_official_address_comes_from_links_json() {
     // The defaults: the new host, and the old one to move from.
     let defaults = Links::default();
-    assert_eq!(defaults.official_server, "play.playhorizon.dev");
-    assert_eq!(defaults.official_server_previous, ["horizon.bunchy7s.dev"]);
+    assert!(defaults.official_server.is_empty());
+    assert!(defaults.official_server_previous.is_empty());
     // The file on main says the same.
     let file = Links::parse(include_str!("../../links.json"));
     assert_eq!(file, defaults);
