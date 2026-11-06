@@ -474,7 +474,7 @@
   "None yet: drop a .hshader or a shader pack .zip here.": "还没有内容：将 .hshader 或光影包 .zip 拖放到这里。",
   "Offline name · the game's own": "离线名称 · 游戏自带",
   "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; the first build downloads Rust and takes 20 to 30 minutes.": "原生模组不在沙盒中运行：它们和任何程序一样，可以完全访问你的电脑。只安装你信任其作者的模组。要使用模组游玩，请在模组页面构建游戏；首次构建会下载 Rust，需要 20 到 30 分钟。",
-  "Your selected version only changes if you were playing the newest one.": "只有在你玩的是最新版本时，所选版本才会跟着变。",
+  "Each time the launcher opens, it builds the newest Horizon Clean commit from source and switches to it. Off: only Update on the Versions page does.": "每次打开启动器时，从源码构建 Horizon Clean 的最新提交并切换到它。关闭：只有“版本”页面上的“更新”会这样做。",
   "Multiplayer": "多人游戏",
   "Delete old versions automatically": "自动删除旧版本",
   "already here": "already here",

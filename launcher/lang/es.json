@@ -474,7 +474,7 @@
   "None yet: drop a .hshader or a shader pack .zip here.": "Aún no hay ninguno: suelta aquí un archivo .hshader o un paquete de shaders .zip.",
   "Offline name · the game's own": "Nombre sin conexión · propio del juego",
   "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; the first build downloads Rust and takes 20 to 30 minutes.": "Los mods nativos no están aislados: se ejecutan con acceso total a tu ordenador, como cualquier programa. Instala solo mods de autores en los que confíes. Para jugar con uno, compila el juego en la página Mods; la primera compilación descarga Rust y tarda de 20 a 30 minutos.",
-  "Your selected version only changes if you were playing the newest one.": "Tu versión seleccionada solo cambia si estabas jugando a la más reciente.",
+  "Each time the launcher opens, it builds the newest Horizon Clean commit from source and switches to it. Off: only Update on the Versions page does.": "Cada vez que se abre el launcher, compila desde el código fuente el commit más reciente de Horizon Clean y cambia a él. Desactivado: solo lo hace Actualizar en la página Versiones.",
   "Multiplayer": "Multijugador",
   "Delete old versions automatically": "Eliminar automáticamente las versiones antiguas",
   "already here": "ya están aquí",

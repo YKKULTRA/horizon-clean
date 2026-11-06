@@ -14,7 +14,7 @@
   "AI": "AI",
   "About": "このアプリについて",
   "Install new versions automatically": "新しいバージョンを自動的にインストールする",
-  "Your selected version only changes if you were playing the newest one.": "選択中のバージョンは、最新版をプレイしていた場合のみ変更されます。",
+  "Each time the launcher opens, it builds the newest Horizon Clean commit from source and switches to it. Off: only Update on the Versions page does.": "ランチャーを開くたびに、Horizon Clean の最新コミットをソースからビルドして切り替えます。オフ：バージョンページの「更新」でのみ行います。",
   "Appearance": "外観",
   "Dark": "ダーク",
   "Light": "ライト",

@@ -14,7 +14,7 @@
   "AI": "Yapay Zeka",
   "About": "Hakkında",
   "Install new versions automatically": "Yeni sürümleri otomatik olarak yükle",
-  "Your selected version only changes if you were playing the newest one.": "Seçtiğiniz sürüm yalnızca en son sürümü oynadıysanız değişir.",
+  "Each time the launcher opens, it builds the newest Horizon Clean commit from source and switches to it. Off: only Update on the Versions page does.": "Başlatıcı her açıldığında en yeni Horizon Clean commit'ini kaynak koddan derler ve ona geçer. Kapalı: bunu yalnızca Sürümler sayfasındaki Güncelle yapar.",
   "Appearance": "Görünüm",
   "Dark": "Koyu",
   "Light": "Açık",

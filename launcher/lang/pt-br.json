@@ -14,7 +14,7 @@
   "AI": "IA",
   "About": "Sobre",
   "Install new versions automatically": "Instalar novas versões automaticamente",
-  "Your selected version only changes if you were playing the newest one.": "Sua versão selecionada só será alterada se você estiver jogando na versão mais recente.",
+  "Each time the launcher opens, it builds the newest Horizon Clean commit from source and switches to it. Off: only Update on the Versions page does.": "Sempre que o launcher abre, ele compila a partir do código-fonte o commit mais recente do Horizon Clean e muda para ele. Desligado: só Atualizar na página Versões faz isso.",
   "Appearance": "Aparência",
   "Dark": "Escuro",
   "Light": "Claro",

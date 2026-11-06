@@ -217,6 +217,10 @@ struct Launcher {
     clean_step: Option<String>,
     clean_started: Option<(Instant, u64)>,
     clean_done: Option<Result<String, String>>,
+    /// The newest commit of the fork's main a Check now found (Settings, About), and whether a
+    /// check is under way.
+    clean_latest: Option<Result<String, String>>,
+    clean_checking: bool,
     confirm_remove: Option<String>,
     picker_open: bool,
     /// Where the accent picker's hue strip is on screen (`themes_page.rs`), to map a click to a
@@ -452,6 +456,8 @@ impl Launcher {
             clean_step: None,
             clean_started: None,
             clean_done: None,
+            clean_latest: None,
+            clean_checking: false,
             confirm_remove: None,
             picker_open: false,
             hue_area: std::rc::Rc::new(std::cell::Cell::new(None)),
@@ -574,6 +580,10 @@ impl Launcher {
         this.load_auth_statuses(true);
         this.releases = Load::Ready(backend::local_releases());
         this.fetch_links();
+        // Horizon Clean: only when the player turned on automatic updates.
+        if this.settings.auto_update_clean() {
+            this.update_clean();
+        }
         if home::getting_ready_preview() {
             this.preparing = true;
             this.play_when_prepared = this.selected().cloned();
@@ -746,6 +756,19 @@ impl Launcher {
                 let _ = tx.send(Msg::CleanProgress(step.label()));
             });
             let _ = tx.send(Msg::Clean(result));
+        });
+    }
+
+    /// Settings' Check now for Horizon Clean: the newest commit of the fork's main, one GitHub
+    /// request, nothing built.
+    fn check_clean(&mut self) {
+        if self.clean_checking {
+            return;
+        }
+        self.clean_checking = true;
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::CleanLatest(clean_update::latest()));
         });
     }
 
@@ -1025,12 +1048,22 @@ impl Launcher {
                 Msg::Updates(Err(e)) => self.update_error = Some(e),
                 Msg::NativeProgress(step) => self.native_step = Some(step),
                 Msg::CleanProgress(step) => self.clean_step = Some(step),
+                Msg::CleanLatest(result) => {
+                    self.clean_checking = false;
+                    self.clean_latest = Some(result);
+                }
                 Msg::Clean(result) => {
                     // A build's last step says how long it took.
                     let last = self.clean_step.take();
                     self.clean_started = None;
                     self.installed = backend::installed();
                     self.reload_instances();
+                    if let Ok(outcome) = &result {
+                        // What it built is the newest commit: Settings says up to date.
+                        if let Some(commit) = clean_update::commit_of(outcome.version()) {
+                            self.clean_latest = Some(Ok(commit));
+                        }
+                    }
                     self.clean_done = Some(match result {
                         Ok(outcome) => {
                             // Update saved the selection: the window's settings follow it.
@@ -2088,9 +2121,6 @@ fn page_header(title: &str, description: &str, t: &Theme) -> Div {
         )
 }
 
-/// One row of a list, as its own panel: a name in the pixel face with an optional detail under
-/// it, then a value or a control on the right. Rows were numbered in the quiet look; `_n` keeps
-/// the call sites as they are.
 /// How an available update is named: a Nightly by its title ("Nightly 2026-10-28 · 0c02067"), a
 /// release by its tag.
 fn update_name(release: &Release) -> &str {
@@ -2100,6 +2130,9 @@ fn update_name(release: &Release) -> &str {
     }
 }
 
+/// One row of a list, as its own panel: a name in the pixel face with an optional detail under
+/// it, then a value or a control on the right. Rows were numbered in the quiet look; `_n` keeps
+/// the call sites as they are.
 fn index_row(
     _n: usize,
     name: impl IntoElement,
@@ -3106,7 +3139,14 @@ impl Launcher {
 
     fn settings_page(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
-        let toggle = disabled(switch("auto-install", false, &t));
+        // Horizon Clean: Update from source each time the launcher opens, when turned on.
+        let toggle = switch("auto-install", self.settings.auto_update_clean(), &t).on_click(
+            cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.settings.auto_update_clean = Some(!this.settings.auto_update_clean());
+                this.settings.save();
+                cx.notify();
+            }),
+        );
         let prune = switch("auto-prune", self.settings.auto_prune(), &t).on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
                 this.settings.prune_old_versions = Some(!this.settings.auto_prune());
@@ -3135,25 +3175,50 @@ impl Launcher {
                 cx.notify();
             }),
         );
-        let horizon = match (&self.updates.horizon, &self.update_error) {
-            (Some(r), _) => trf("{version} available", &[("version", update_name(r))]),
-            (None, Some(e)) => e.clone(),
-            (None, None) if self.checked.is_some() => tr("Up to date").to_string(),
-            _ => tr("Checking…").to_string(),
+        // Horizon Clean: the build in use, and what a check of the fork's main found. The fork
+        // publishes no release, so upstream's release check has nothing to say here.
+        let in_use = self.selected().cloned().unwrap_or_else(|| "-".to_string());
+        let newer = match &self.clean_latest {
+            Some(Ok(commit)) => {
+                let current = self.selected().and_then(|v| clean_update::commit_of(v));
+                (current.as_deref() != Some(commit.as_str())).then(|| commit.clone())
+            }
+            _ => None,
         };
-        let horizon_action = self
-            .updates
-            .horizon
-            .as_ref()
-            .filter(|_| self.installing.is_none())
-            .map(|_| {
-                button("settings-install", "Install", Kind::Secondary, &t)
+        let horizon = match (&self.clean_step, self.clean_checking, &self.clean_latest) {
+            (Some(step), _, _) => step.clone(),
+            (None, true, _) => tr("Checking…").to_string(),
+            (None, false, Some(Err(e))) => e.clone(),
+            (None, false, Some(Ok(_))) => match &newer {
+                Some(commit) => format!(
+                    "{in_use}  ·  {}",
+                    trf(
+                        "{version} available",
+                        &[("version", &clean_update::version_for(commit))]
+                    )
+                ),
+                None => format!("{in_use}  ·  {}", tr("Up to date")),
+            },
+            (None, false, None) => in_use,
+        };
+        let idle = self.clean_step.is_none() && self.native_step.is_none() && !self.clean_checking;
+        let horizon_action = idle.then(|| {
+            if newer.is_some() {
+                button("settings-clean-update", "Update", Kind::Secondary, &t)
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.install_update();
+                        this.update_clean();
                         cx.notify();
                     }))
                     .into_any_element()
-            });
+            } else {
+                button("settings-clean-check", "Check now", Kind::Ghost, &t)
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.check_clean();
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            }
+        });
         let launcher = match &self.self_update {
             SelfUpdate::Downloading(v, p) => {
                 let done = format!("{:.0}", p * 100.);
@@ -3259,7 +3324,7 @@ impl Launcher {
                         n + 1,
                         tr("Install new versions automatically"),
                         Some(plain(
-                            "Your selected version only changes if you were playing the newest one.",
+                            "Each time the launcher opens, it builds the newest Horizon Clean commit from source and switches to it. Off: only Update on the Versions page does.",
                         )),
                         Some(toggle.into_any_element()),
                         &t,

@@ -3110,6 +3110,8 @@ pub enum Msg {
     CleanProgress(String),
     /// Update from source ended (`clean_update::update`).
     Clean(Result<crate::clean_update::Outcome, String>),
+    /// The newest commit of the fork's main, or why it couldn't be read (`clean_update::latest`).
+    CleanLatest(Result<String, String>),
     /// A Java instance's game is ready to start (`java_game`, wrapped): the instance's id and
     /// game folder, and the command or why not.
     /// A Java instance's game ready to start, and its variables for the post-exit command.
@@ -3258,6 +3260,11 @@ pub struct Settings {
     /// (`prune_old_versions`). Only a player who turned it off has `false` here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prune_old_versions: Option<bool>,
+    /// Horizon Clean: when the launcher opens it runs Update from source (`clean_update`), which
+    /// builds the newest commit of the fork when there is one. Off unless the player turns it on;
+    /// upstream's `install_new_versions` stays ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_update_clean: Option<bool>,
     /// How many of the newest release versions pruning keeps. Unset means [`KEEP_NEWEST`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_versions: Option<usize>,
@@ -3370,6 +3377,11 @@ impl Settings {
     /// Whether new Horizon versions are installed automatically.
     pub fn auto_install(&self) -> bool {
         false
+    }
+    /// Whether the launcher runs Horizon Clean's Update from source when it opens: off unless
+    /// the player turned it on.
+    pub fn auto_update_clean(&self) -> bool {
+        self.auto_update_clean.unwrap_or(false)
     }
     /// Whether old versions are deleted after an install.
     pub fn auto_prune(&self) -> bool {
@@ -4391,7 +4403,10 @@ pub fn {f}("
             r#"{"auto_install":true}"#,
         ] {
             assert!(!Settings::parse(settings).auto_install());
+            // Nor does an old key turn on Horizon Clean's update from source: only its own.
+            assert!(!Settings::parse(settings).auto_update_clean());
         }
+        assert!(Settings::parse(r#"{"auto_update_clean":true}"#).auto_update_clean());
         assert!(!self_update_allowed());
     }
 

@@ -997,7 +997,9 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
         "selected-version" => s.selected = Some(backend::resolve_version(Some(value))?),
         "minecraft-dir" => s.minecraft_dir = folder(value),
         "server-dir" => s.server_dir = folder(value),
-        "install-new-versions" => s.install_new_versions = Some(on_off(value)?),
+        // Horizon Clean: the Settings switch of that name, Update from source when the launcher
+        // opens (upstream's own key stays ignored).
+        "install-new-versions" => s.auto_update_clean = Some(on_off(value)?),
         "prune-old-versions" => s.prune_old_versions = Some(on_off(value)?),
         "keep-versions" => {
             s.keep_versions = match value {
@@ -1070,7 +1072,7 @@ fn settings_json(s: &backend::Settings) -> serde_json::Value {
         "selected_version": backend::resolve_version(None).ok(),
         "minecraft_dir": s.minecraft_dir,
         "server_dir": backend::server_dir(None),
-        "install_new_versions": s.auto_install(),
+        "install_new_versions": s.auto_update_clean(),
         "prune_old_versions": s.auto_prune(),
         "keep_versions": s.keep_newest(),
         "opening_animation": !s.skip_opening,
