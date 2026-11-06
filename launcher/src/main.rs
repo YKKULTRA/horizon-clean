@@ -62,6 +62,7 @@ use gpui::{
 };
 use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Updates};
+use horizon_launcher::clean_update;
 use horizon_launcher::i18n::{self, tr, trf};
 use horizon_launcher::instances;
 use horizon_launcher::native_mods;
@@ -211,6 +212,11 @@ struct Launcher {
     /// The mods of a build made for other Horizon versions (`native_mods::MISMATCH`): the build
     /// waits for "Build anyway".
     native_mismatch: Option<String>,
+    /// Horizon Clean's Update from source (`clean_update`, on the Versions page): the step while
+    /// it runs, when it started and the whole seconds last drawn, and how the last one ended.
+    clean_step: Option<String>,
+    clean_started: Option<(Instant, u64)>,
+    clean_done: Option<Result<String, String>>,
     confirm_remove: Option<String>,
     picker_open: bool,
     /// Where the accent picker's hue strip is on screen (`themes_page.rs`), to map a click to a
@@ -443,6 +449,9 @@ impl Launcher {
             native_update: None,
             native_builds: Default::default(),
             native_mismatch: None,
+            clean_step: None,
+            clean_started: None,
+            clean_done: None,
             confirm_remove: None,
             picker_open: false,
             hue_area: std::rc::Rc::new(std::cell::Cell::new(None)),
@@ -684,7 +693,8 @@ impl Launcher {
     /// warning was Update's: then it moves to that newer Horizon.
     /// `anyway`: the player agreed to build mods made for other Horizon versions together.
     fn build_native(&mut self, anyway: bool) {
-        if self.native_step.is_some() {
+        // One build at a time: Update from source shares the native build's folder.
+        if self.native_step.is_some() || self.clean_step.is_some() {
             return;
         }
         self.native_confirm = None;
@@ -721,6 +731,24 @@ impl Launcher {
         });
     }
 
+    /// Horizon Clean's Update (the player's button, never on its own): the newest commit of the
+    /// fork's main branch built from source in the release profile, then selected.
+    fn update_clean(&mut self) {
+        if self.clean_step.is_some() || self.native_step.is_some() {
+            return;
+        }
+        self.clean_done = None;
+        self.clean_step = Some(tr("Checking GitHub for the newest commit").into());
+        self.clean_started = Some((Instant::now(), 0));
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = clean_update::update(native_mods::Profile::Release, |step| {
+                let _ = tx.send(Msg::CleanProgress(step.label()));
+            });
+            let _ = tx.send(Msg::Clean(result));
+        });
+    }
+
     fn fetch_releases(&mut self) {
         self.releases = Load::Loading;
         let tx = self.tx.clone();
@@ -753,6 +781,12 @@ impl Launcher {
         }
         // The running build's clock moves on each second.
         if let Some((started, shown)) = &mut self.native_started {
+            if started.elapsed().as_secs() != *shown {
+                *shown = started.elapsed().as_secs();
+                changed = true;
+            }
+        }
+        if let Some((started, shown)) = &mut self.clean_started {
             if started.elapsed().as_secs() != *shown {
                 *shown = started.elapsed().as_secs();
                 changed = true;
@@ -990,6 +1024,35 @@ impl Launcher {
                 }
                 Msg::Updates(Err(e)) => self.update_error = Some(e),
                 Msg::NativeProgress(step) => self.native_step = Some(step),
+                Msg::CleanProgress(step) => self.clean_step = Some(step),
+                Msg::Clean(result) => {
+                    // A build's last step says how long it took.
+                    let last = self.clean_step.take();
+                    self.clean_started = None;
+                    self.installed = backend::installed();
+                    self.reload_instances();
+                    self.clean_done = Some(match result {
+                        Ok(outcome) => {
+                            // Update saved the selection: the window's settings follow it.
+                            self.settings.selected = Some(outcome.version().to_owned());
+                            Ok(match outcome {
+                                clean_update::Outcome::UpToDate(v) => trf(
+                                    "Up to date: {version} is the newest commit.",
+                                    &[("version", &v)],
+                                ),
+                                clean_update::Outcome::Built(v) => {
+                                    let built =
+                                        trf("{version} is built and selected.", &[("version", &v)]);
+                                    match last {
+                                        Some(last) => format!("{built} {last}"),
+                                        None => built,
+                                    }
+                                }
+                            })
+                        }
+                        Err(e) => Err(trf("Update failed: {error}", &[("error", &e)])),
+                    });
+                }
                 Msg::Native(result) => {
                     // The last step of a build that worked says how it went.
                     let last = self.native_step.take();
@@ -3860,6 +3923,42 @@ impl Launcher {
             )
     }
 
+    /// The Versions page's Horizon Clean row: Update from source (`clean_update`), what it is
+    /// doing, and how the last one ended.
+    fn clean_update_row(&self, cx: &mut Context<Self>) -> Div {
+        let t = self.theme;
+        let status = match (&self.clean_step, &self.clean_done) {
+            (Some(step), _) => div().text_color(t.accent).child(format!(
+                "{step} - {}",
+                native_mods::duration_label(
+                    self.clean_started.map_or(0, |(s, _)| s.elapsed().as_secs())
+                )
+            )),
+            (None, Some(Ok(done))) => div().text_color(t.success).child(done.clone()),
+            (None, Some(Err(e))) => div().text_color(t.danger).child(e.clone()),
+            (None, None) => div().child(trf(
+                "Builds the newest commit of {repo} from source with the launcher's own Rust (release build), then plays it. The first build takes a while.",
+                &[("repo", clean_update::REPO)],
+            )),
+        };
+        // One build at a time, this or a native one.
+        let right = (self.clean_step.is_none() && self.native_step.is_none()).then(|| {
+            button("clean-update", "Update", Kind::Primary, &t)
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.update_clean();
+                    cx.notify();
+                }))
+                .into_any_element()
+        });
+        index_row(
+            0,
+            "Horizon Clean",
+            Some(status.into_any_element()),
+            right,
+            &t,
+        )
+    }
+
     /// One installed native build on the Versions page: what it was built on, and Use and Remove.
     fn native_build_row(
         &self,
@@ -3967,7 +4066,8 @@ impl Launcher {
                     "Installed versions use {size}.",
                     &[("size", &megabytes(used))],
                 ))
-            }));
+            }))
+            .child(self.clean_update_row(cx));
         // Native-mods builds are made here, not downloaded: they are listed apart from the releases.
         let native: Vec<String> = self
             .installed

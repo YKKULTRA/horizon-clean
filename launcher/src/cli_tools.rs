@@ -15,6 +15,8 @@ const NOT_TOOLS: &[&str] = &[
     "agent-config",
     "no-ai",
     "native-build",
+    // Horizon Clean's Update from source compiles and installs a new game: the player's button.
+    "update-clean",
     // They install native code nobody reviewed, and say it first: the player's decision.
     "mods add-github",
     "mods update-github",

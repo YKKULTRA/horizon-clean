@@ -613,5 +613,11 @@
   "The renewed sign-in could not be saved in the keychain. Unlock it and retry.": "Impossible d'enregistrer la connexion renouvelée dans le trousseau. Déverrouillez-le et réessayez.",
   "Another account operation is running. Try again in a moment.": "Une autre opération de compte est en cours. Réessayez dans un instant.",
   "Built on {base}": "Compilé sur {base}",
-  "Native mod builds": "Builds avec mods natifs"
+  "Native mod builds": "Builds avec mods natifs",
+  "Checking GitHub for the newest commit": "Recherche du dernier commit sur GitHub",
+  "Up to date: {version} is the newest commit.": "À jour : {version} est le dernier commit.",
+  "{version} is built and selected.": "{version} est compilée et sélectionnée.",
+  "Update failed: {error}": "La mise à jour a échoué : {error}",
+  "Builds the newest commit of {repo} from source with the launcher's own Rust (release build), then plays it. The first build takes a while.": "Compile le dernier commit de {repo} depuis les sources avec le Rust du launcher (build release), puis le lance. La première compilation prend un moment.",
+  "Update": "Mettre à jour"
 }

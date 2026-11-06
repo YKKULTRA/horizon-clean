@@ -97,6 +97,16 @@ Native mods (docs/native-mods.md): compile mixin bundles on the Horizon revision
 
 MCP: none: the player's switch.
 
+## `horizon-launcher update-clean`
+
+Horizon Clean: build the newest commit of this fork's main branch on GitHub from source with the launcher's own Rust, install it as clean-<commit> and select it. Nothing else builds or updates by itself.
+
+    horizon-launcher update-clean
+
+- `--profile` (release, fast): The Cargo profile: release (the default: thin LTO, the faster game) or fast (quicker to rebuild)
+
+MCP: none: the player's switch.
+
 ## `horizon-launcher notes`
 
 Show a release's patch notes (default: the newest).

@@ -3,6 +3,7 @@ pub mod account;
 pub mod agents;
 pub mod backend;
 pub mod browser;
+pub mod clean_update;
 pub mod datapacks;
 pub mod desktop;
 pub mod desktop_seams;

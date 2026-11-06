@@ -583,7 +583,7 @@ fn hooks_in(source: &str) -> Option<u32> {
 fn hooks_at(revision: &str) -> Option<u32> {
     let url = format!(
         "https://raw.githubusercontent.com/{}/{revision}/{HOOKS_FILE}",
-        backend::REPO
+        crate::clean_update::REPO
     );
     let text = backend::get(&url).ok()?.into_string().ok()?;
     hooks_in(&text)
@@ -682,6 +682,12 @@ fn profile_of(source: &Path, chosen: Profile) -> Profile {
 
 /// The Horizon commit `version` (an installed release or Nightly) was built from, from GitHub.
 pub fn revision_of(version: &str) -> Result<String, String> {
+    // Horizon Clean's builds name their commit themselves, and it is this fork's.
+    if crate::clean_update::is_clean(version) {
+        return crate::clean_update::commit_of(version).ok_or_else(|| {
+            format!("{version} doesn't say which Horizon Clean commit it was built from.")
+        });
+    }
     let reference = match version.strip_prefix("nightly-") {
         // nightly-2026-10-28-0c02067: the commit is its last word.
         Some(rest) => rest.rsplit('-').next().unwrap_or(rest),
@@ -689,7 +695,7 @@ pub fn revision_of(version: &str) -> Result<String, String> {
     };
     let url = format!(
         "https://api.github.com/repos/{}/commits/{reference}",
-        backend::REPO
+        crate::clean_update::REPO
     );
     let commit: serde_json::Value = backend::get(&url)?.into_json().map_err(|e| e.to_string())?;
     commit["sha"]
@@ -722,11 +728,14 @@ pub fn about(version: &str) -> Option<About> {
     })
 }
 
-/// The newest installed release or Nightly in `installed` (newest first).
+/// The newest installed release or Nightly in `installed` (newest first). Horizon Clean: its
+/// newest clean build first, when there is one.
 fn newest_installed(installed: &[String]) -> Option<&String> {
-    installed
-        .iter()
-        .find(|t| backend::is_game_tag(t) || t.starts_with("nightly-"))
+    crate::clean_update::newest_installed(installed).or_else(|| {
+        installed
+            .iter()
+            .find(|t| backend::is_game_tag(t) || t.starts_with("nightly-"))
+    })
 }
 
 /// The installed version a build for an instance that plays `current` starts from: `current`
@@ -747,7 +756,12 @@ pub fn update_for(version: &str, installed: &[String]) -> Option<String> {
 
 pub fn newer_than(base: &str, installed: &[String]) -> Option<String> {
     newest_installed(installed)
-        .filter(|n| *n != base && backend::compare_versions(n, base).is_gt())
+        .filter(|n| {
+            *n != base
+                // A clean build installed after another is the newer one, whatever its commit.
+                && (crate::clean_update::is_clean(n)
+                    || backend::compare_versions(n, base).is_gt())
+        })
         .cloned()
 }
 
@@ -932,7 +946,7 @@ impl Step {
 /// Runs `cmd`, its output appended to the build log; `line` sees each line of its standard error.
 /// An error ends with its first `error` lines and the last lines: a failed build script's output
 /// alone could push the line naming its crate out of the last ones.
-fn run(mut cmd: Command, what: &str, mut line: impl FnMut(&str)) -> Result<(), String> {
+pub(crate) fn run(mut cmd: Command, what: &str, mut line: impl FnMut(&str)) -> Result<(), String> {
     let mut log = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -1060,7 +1074,7 @@ fn compile(rust: &Toolchain, stage: &Path, target: &Path, profile: Profile) -> C
 
 /// The launcher's cargo running `subcommand` on the workspace `dir`, at low priority, with only
 /// the workspace's own Cargo configuration ([`compile`]).
-fn cargo(rust: &Toolchain, dir: &Path, subcommand: &str) -> Command {
+pub(crate) fn cargo(rust: &Toolchain, dir: &Path, subcommand: &str) -> Command {
     let mut cmd = rust.command(&rust.cargo());
     rust_toolchain::low_priority(&mut cmd);
     cmd.arg(subcommand);
@@ -1142,15 +1156,16 @@ fn post_build_programs(
 /// Horizon's source at commit `revision`: GitHub's archive of it, unpacked once, with the commit in
 /// `.horizon-revision` (bundles pin it). A Nightly's commit stays downloadable after the Nightly
 /// is gone: its `nightly-source/…` tag keeps it (docs/release-flow.md). Links are left out:
-/// horizon-mixins refuses them, and none is needed to build.
-fn source(revision: &str) -> Result<PathBuf, String> {
+/// horizon-mixins refuses them, and none is needed to build. Horizon Clean: from this fork
+/// (`clean_update::REPO`), so native mods build on its code.
+pub(crate) fn source(revision: &str) -> Result<PathBuf, String> {
     let dir = root().join("source").join(revision);
     if dir.join(".horizon-revision").is_file() {
         return Ok(dir);
     }
     let archive = format!(
         "https://codeload.github.com/{}/tar.gz/{revision}",
-        backend::REPO
+        crate::clean_update::REPO
     );
     let partial = root().join("source").join(format!(".{revision}.partial"));
     let top = unpack_archive(&archive, &partial, u64::MAX)?;
@@ -1190,7 +1205,7 @@ pub(crate) fn unpack_archive(url: &str, partial: &Path, limit: u64) -> Result<Pa
 
 /// Makes `to` hold `from`'s files, writing only those that changed, so Cargo, which goes by file
 /// times, recompiles only what the mods changed.
-fn sync(from: &Path, to: &Path) -> Result<(), String> {
+pub(crate) fn sync(from: &Path, to: &Path) -> Result<(), String> {
     let new = files(from)?;
     let old = if to.is_dir() { files(to)? } else { Vec::new() };
     for (name, path) in &new {
@@ -1261,7 +1276,7 @@ pub fn build(
             None => revision_of(base),
         },
         None,
-        |r| committed(backend::REPO, r),
+        |r| committed(crate::clean_update::REPO, r),
     )?;
     let game = || revision_of(origin).ok();
     let revision = with_hooks(&mods, pinned, free, game, hooks_at)?;

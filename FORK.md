@@ -52,7 +52,17 @@ Only what you use: Microsoft/Xbox sign-in, Mojang assets and Java downloads, mul
 
 ## Not changed yet
 
-The launcher's manual release downloads, its native-mod builds and `horizon-server update` still use upstream's repository (`horizon-rust/horizon`). They install or compile upstream's code, not this fork's. The launcher still starts those builds with telemetry turned off (above). Pointing them at this repository is planned.
+The launcher's manual release downloads and `horizon-server update` still use upstream's repository (`horizon-rust/horizon`). They install upstream's code, not this fork's. The launcher still starts those builds with telemetry turned off (above).
+
+## Updating (from source)
+
+The launcher's **Versions** page has a **Horizon Clean** row with an **Update** button. Nothing checks or updates by itself; only that button (or `horizon-launcher update-clean`) does this:
+
+1. Asks GitHub for the newest commit of this repository's `main`.
+2. Downloads that commit's source snapshot and compiles the game, `horizon-ctl`, `horizon-prepare` and `horizon-server` with the launcher's own Rust (the one native mods build with), in the release profile, at low priority. The first build takes a while; later ones recompile only what changed.
+3. Installs it as its own version, `clean-<commit>`, reuses the Minecraft files another installed version already prepared, and selects it. Instances that played a clean build move to it; the one before stays for going back, older ones are removed.
+
+The computer still needs a C compiler and the ALSA and udev headers (see Build). Native mods build on this repository's code too, on the clean build an instance plays; mods made for a newer upstream Nightly than this fork's base may not apply until this fork catches up.
 
 ## Build (Linux x86-64)
 

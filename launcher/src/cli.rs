@@ -792,6 +792,15 @@ enum Cmd {
         #[arg(long, value_parser = ["fast", "release"])]
         profile: Option<String>,
     },
+    /// Horizon Clean: build the newest commit of this fork's main branch on GitHub from source
+    /// with the launcher's own Rust, install it as clean-<commit> and select it. Nothing else
+    /// builds or updates by itself
+    UpdateClean {
+        /// The Cargo profile: release (the default: thin LTO, the faster game) or fast (quicker
+        /// to rebuild)
+        #[arg(long, value_parser = ["release", "fast"])]
+        profile: Option<String>,
+    },
     /// Show a release's patch notes (default: the newest)
     Notes { tag: Option<String> },
     /// Show the Discord, sponsor and website links
@@ -1408,6 +1417,31 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             let dir = backend::server_dir(dir);
             // The server inherits this terminal, so typed lines reach its console.
             attached(backend::server(&tag, &dir, accept_eula)?)?
+        }
+        Cmd::UpdateClean { profile } => {
+            let started = std::time::Instant::now();
+            let profile = profile
+                .as_deref()
+                .and_then(native_mods::Profile::parse)
+                .unwrap_or(native_mods::Profile::Release);
+            eprintln!(
+                "Checking {} {} on GitHub",
+                horizon_launcher::clean_update::REPO,
+                horizon_launcher::clean_update::BRANCH
+            );
+            let outcome = horizon_launcher::clean_update::update(profile, |step| {
+                let secs = started.elapsed().as_secs();
+                eprintln!("[{:>2}:{:02}] {}", secs / 60, secs % 60, step.label())
+            })?;
+            match outcome {
+                horizon_launcher::clean_update::Outcome::UpToDate(v) => {
+                    println!("Up to date: {v} is the newest commit, and it is selected.")
+                }
+                horizon_launcher::clean_update::Outcome::Built(v) => println!(
+                    "{v} built and selected ({:.0} s).",
+                    started.elapsed().as_secs_f64()
+                ),
+            }
         }
         Cmd::Notes { tag } => {
             let r = backend::release_notes(tag.as_deref())?;

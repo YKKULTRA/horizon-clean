@@ -815,6 +815,21 @@ pub(crate) fn install_as(
     Ok(())
 }
 
+/// Installs the finished version folder `folder` (beside the versions, a `.{tag}.partial` one) as
+/// `tag`, as a downloaded release ends: marked complete, then given the resources another
+/// installed version prepared when they are the same ones. Horizon Clean's source builds
+/// (`clean_update`) install this way.
+pub(crate) fn install_folder(tag: &str, folder: &Path) -> Result<(), String> {
+    let root = versions_dir();
+    let target = version_dir(tag);
+    let _ = fs::remove_dir_all(&target);
+    fs::rename(folder, &target).map_err(|e| e.to_string())?;
+    fs::write(target.join(COMPLETE), "").map_err(|e| e.to_string())?;
+    reuse_prepared(&root, tag);
+    complete_assets(tag);
+    Ok(())
+}
+
 pub fn remove(tag: &str) -> Result<(), String> {
     let dir = version_dir(tag);
     // The marker goes first: a version counted as installed until its folder is gone comes back
@@ -3087,6 +3102,10 @@ pub enum Msg {
     NativeProgress(String),
     /// The native-mods build ended: the version built, or why not.
     Native(Result<String, String>),
+    /// Where Horizon Clean's Update from source is (`native_mods::Step::label`).
+    CleanProgress(String),
+    /// Update from source ended (`clean_update::update`).
+    Clean(Result<crate::clean_update::Outcome, String>),
     /// A Java instance's game is ready to start (`java_game`, wrapped): the instance's id and
     /// game folder, and the command or why not.
     /// A Java instance's game ready to start, and its variables for the post-exit command.

@@ -613,5 +613,11 @@
   "The renewed sign-in could not be saved in the keychain. Unlock it and retry.": "无法将续期后的登录信息保存到钥匙串。请解锁后重试。",
   "Another account operation is running. Try again in a moment.": "另一个账户操作正在进行。请稍后重试。",
   "Built on {base}": "基于 {base} 构建",
-  "Native mod builds": "原生模组构建"
+  "Native mod builds": "原生模组构建",
+  "Checking GitHub for the newest commit": "正在 GitHub 上检查最新提交",
+  "Up to date: {version} is the newest commit.": "已是最新：{version} 是最新提交。",
+  "{version} is built and selected.": "{version} 已构建并选中。",
+  "Update failed: {error}": "更新失败：{error}",
+  "Builds the newest commit of {repo} from source with the launcher's own Rust (release build), then plays it. The first build takes a while.": "使用启动器自带的 Rust 从源码构建 {repo} 的最新提交（release 构建），然后用它游玩。首次构建需要一些时间。",
+  "Update": "更新"
 }
