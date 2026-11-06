@@ -13,14 +13,11 @@ serde_json = "1"
 ruzstd = "0.9"
 # The random install ID and outbox file names.
 getrandom = "0.3"
-# Sending, for the launcher (and the game's "I'm playing" ping); the ingest server builds without it.
-ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
-
+# Compatibility feature names only. This crate has no HTTP dependency or transport.
 [features]
 default = ["upload", "live"]
-upload = ["dep:ureq"]
-# The "I'm playing" ping and reading the live count (`live`), for the game and the launcher.
-live = ["dep:ureq"]
+upload = []
+live = []
 
 [[test]]
 name = "consent_gating"

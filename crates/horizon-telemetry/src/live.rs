@@ -101,34 +101,15 @@ pub struct Count {
     pub platforms: BTreeMap<String, u64>,
 }
 
-/// Sends `ping` to `endpoint` (`https://host`, without a trailing slash).
+/// Live telemetry transport was removed from this fork.
 #[cfg(feature = "live")]
-pub fn send(endpoint: &str, ping: &Ping) -> Result<(), String> {
-    agent()
-        .post(&format!("{endpoint}/v1/live"))
-        .set("Content-Type", "application/json")
-        .send_string(&serde_json::to_string(ping).map_err(|e| e.to_string())?)
-        .map(drop)
-        .map_err(|e| e.to_string())
-}
-
-/// The live count at `endpoint`.
-#[cfg(feature = "live")]
-pub fn fetch(endpoint: &str) -> Result<Count, String> {
-    let body = agent()
-        .get(&format!("{endpoint}/v1/live"))
-        .call()
-        .map_err(|e| e.to_string())?
-        .into_string()
-        .map_err(|e| e.to_string())?;
-    serde_json::from_str(&body).map_err(|e| e.to_string())
+pub fn send(_endpoint: &str, _ping: &Ping) -> Result<(), String> {
+    Err("Telemetry was removed from this build".into())
 }
 
 #[cfg(feature = "live")]
-fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(5))
-        .build()
+pub fn fetch(_endpoint: &str) -> Result<Count, String> {
+    Err("Telemetry was removed from this build".into())
 }
 
 #[cfg(test)]

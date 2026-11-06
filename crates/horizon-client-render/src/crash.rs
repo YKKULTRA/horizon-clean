@@ -373,7 +373,6 @@ fn deliver(home: &Path, report: Report) -> Option<PathBuf> {
         ),
     );
     crate::logging::flush();
-    crate::telemetry::keep_crash(home, &report);
     match report.save(home) {
         Ok(path) => {
             eprintln!("{SAVED_LINE}{}", path.display());
