@@ -14,7 +14,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-const REPO: &str = "horizon-rust/horizon";
+/// Horizon Clean's repository: it publishes no release (its builds are compiled from source by
+/// the launcher's Update), so an update finds none rather than installing upstream's server.
+const REPO: &str = "YKKULTRA/horizon-clean";
 /// The release archives for this computer, most specific first: on Linux the server build (no ALSA or
 /// udev), else the full game (releases before the server build).
 const ASSETS: &[&str] = if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
@@ -268,7 +270,10 @@ pub fn release(tag: Option<&str>) -> Result<Release, String> {
         },
     }
     .map_err(|e| match e.as_str() {
-        "404" => format!("no release {} on GitHub", tag.unwrap_or("")),
+        "404" => format!(
+            "no release {} on GitHub: {REPO} publishes none, update with the launcher's Update instead",
+            tag.unwrap_or("")
+        ),
         _ => e,
     })?;
     let json = serde_json::from_slice(&text).map_err(|e| format!("GitHub's answer: {e}"))?;

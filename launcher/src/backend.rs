@@ -9,8 +9,12 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-pub const REPO: &str = "horizon-rust/horizon";
-pub const README_URL: &str = "https://github.com/horizon-rust/horizon/blob/main/launcher/README.md";
+/// The GitHub repository releases are listed and downloaded from. Horizon Clean: this fork's,
+/// which publishes none (its builds are compiled from source, `clean_update`), so no upstream
+/// build is offered or installed.
+pub const REPO: &str = crate::clean_update::REPO;
+pub const README_URL: &str =
+    "https://github.com/YKKULTRA/horizon-clean/blob/main/launcher/README.md";
 /// The players' page on connecting an AI agent (the website's docs/agents.md).
 pub const AGENT_DOCS_URL: &str = "https://playhorizon.dev/docs/agents";
 /// This launcher's version: the release workflow sets `HORIZON_LAUNCHER_VERSION` from the
@@ -478,7 +482,7 @@ impl Default for Links {
         Self {
             discord: "https://discord.gg/playhorizon".into(),
             sponsor: String::new(),
-            website: "https://github.com/horizon-rust/horizon".into(),
+            website: "https://github.com/YKKULTRA/horizon-clean".into(),
             official_server: String::new(),
             official_server_previous: Vec::new(),
         }
@@ -4396,7 +4400,10 @@ pub fn {f}("
         let defaults = Links::default();
         assert_eq!(defaults.discord, "https://discord.gg/playhorizon");
         assert!(defaults.sponsor.is_empty());
-        assert_eq!(defaults.website, "https://github.com/horizon-rust/horizon");
+        assert_eq!(
+            defaults.website,
+            "https://github.com/YKKULTRA/horizon-clean"
+        );
         // The file on main says the same thing as the defaults.
         assert_eq!(Links::parse(include_str!("../links.json")), defaults);
         // Unreadable or missing, offline included: the defaults.
