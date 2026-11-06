@@ -329,6 +329,34 @@ pub(crate) fn shadow_color(value: &Value) -> Option<u32> {
 pub fn to_text(v: &Value, resolve: &mut dyn FnMut(&str) -> Text) -> Text {
     to_text_with(v, resolve, &mut |_| None)
 }
+
+thread_local! {
+    /// Inside [`to_text_guarded`]: translations and key binds resolve as a vanilla client's.
+    static GUARDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `to_text` for text a server can read back (a sign's lines, an anvil's item name): its
+/// translation keys resolve only from vanilla's and the resource packs' strings, and its
+/// `keybind` components name vanilla's default keys, so a server can't learn the mods, Horizon or
+/// the player's bindings from what comes back (`exploit_guard`).
+pub fn to_text_guarded(v: &Value, resolve: &mut dyn FnMut(&str) -> Text) -> Text {
+    let before = GUARDED.with(|g| g.replace(true));
+    let text = to_text(v, resolve);
+    GUARDED.with(|g| g.set(before));
+    text
+}
+
+/// `KeybindContents.getNestedComponent` as an unmodified vanilla client with default bindings
+/// answers it: a vanilla mapping's default key, else the name translated (vanilla's
+/// `KeyMapping.createNameSupplier` for a mapping it doesn't have).
+fn guarded_keybind(name: &str) -> Text {
+    match crate::exploit_guard::keybind_default(name) {
+        Some(default) if crate::lang::has_vanilla(name) => {
+            crate::key_display::display_name(default)
+        }
+        _ => Text::translate_vanilla(name, &[]),
+    }
+}
 /// `to_text` with a hook resolving other contents (`nbt`) from the object.
 pub fn to_text_with(
     v: &Value,
@@ -383,15 +411,32 @@ pub fn to_text_with(
                             .collect()
                     })
                     .unwrap_or_default();
-                let translated = Text::translate(key, &args);
-                match o.get("fallback").and_then(Value::as_str) {
-                    Some(fallback) if translated.plain() == key => Text::translate(fallback, &args),
-                    _ => translated,
+                if GUARDED.with(std::cell::Cell::get) {
+                    // TranslatableContents.decompose: `getOrDefault(key, fallback)`, the fallback
+                    // being the pattern itself when the language lacks the key.
+                    match o.get("fallback").and_then(Value::as_str) {
+                        Some(fallback) if !crate::lang::has_vanilla(key) => {
+                            Text::translate_from(key, fallback.to_owned(), &args)
+                        }
+                        _ => Text::translate_vanilla(key, &args),
+                    }
+                } else {
+                    let translated = Text::translate(key, &args);
+                    match o.get("fallback").and_then(Value::as_str) {
+                        Some(fallback) if translated.plain() == key => {
+                            Text::translate(fallback, &args)
+                        }
+                        _ => translated,
+                    }
                 }
             } else if let Some(sel) = o.get("selector").and_then(Value::as_str) {
                 resolve(sel)
             } else if let Some(key) = o.get("keybind").and_then(Value::as_str) {
-                crate::key_display::display_name(key)
+                if GUARDED.with(std::cell::Cell::get) {
+                    guarded_keybind(key)
+                } else {
+                    crate::key_display::display_name(key)
+                }
             } else {
                 Text::empty()
             };
@@ -478,6 +523,16 @@ pub fn name_text(tag: &Tag) -> Text {
     match tag {
         Tag::String(s) => Text::legacy(&s.to_string_lossy()),
         t => crate::scoreboard::comp_text(&crate::scoreboard::tag_to_json(t)),
+    }
+}
+/// `name_text` for a name a server can read back (an anvil's rename box): see
+/// [`to_text_guarded`].
+pub fn name_text_guarded(tag: &Tag) -> Text {
+    match tag {
+        Tag::String(s) => Text::legacy(&s.to_string_lossy()),
+        t => to_text_guarded(&crate::scoreboard::tag_to_json(t), &mut |s| {
+            Text::literal(s)
+        }),
     }
 }
 
@@ -623,5 +678,95 @@ mod tests {
         assert_eq!(v["text"], Value::String("Infinity".into()));
         let (v, _) = parse_snbt("{n:1.5}").unwrap();
         assert_eq!(v["n"], Value::from(1.5));
+    }
+
+    /// The only test in this crate that sets the process-wide language.
+    #[test]
+    fn guarded_text_resolves_as_a_vanilla_client_would() {
+        use crate::lang::{self, Language, ResourceSource};
+        use serde_json::json;
+        struct Mem(std::collections::HashMap<String, Vec<u8>>);
+        impl ResourceSource for Mem {
+            fn read(&self, path: &str) -> Option<Vec<u8>> {
+                self.0.get(path).cloned()
+            }
+        }
+        let vanilla = Mem(std::collections::HashMap::from([(
+            "assets/minecraft/lang/en_us.json".into(),
+            br#"{"key.jump":"Jump","key.forward":"Walk Forwards","key.keyboard.space":"Space","block.minecraft.stone":"Stone","chat.type.text":"<%s> %s"}"#
+                .to_vec(),
+        )]));
+        lang::set(Language::load(&[&vanilla], "en_us"));
+        crate::exploit_guard::set_keybind_defaults([
+            ("key.jump", "key.keyboard.space"),
+            ("key.forward", "key.keyboard.w"),
+            ("key.friends", "key.keyboard.o"),
+        ]);
+        let plain = |v: Value| to_text(&v, &mut |s| Text::literal(s)).plain();
+        let guarded = |v: Value| to_text_guarded(&v, &mut |s| Text::literal(s)).plain();
+        // Horizon's own string: shown in Horizon's text, its key for a server.
+        let horizon = json!({"translate": "horizon.options.controller"});
+        assert_eq!(plain(horizon.clone()), "Controller");
+        assert_eq!(guarded(horizon), "horizon.options.controller");
+        // Vanilla's strings still resolve, with their arguments.
+        assert_eq!(
+            guarded(json!({"translate": "block.minecraft.stone"})),
+            "Stone"
+        );
+        assert_eq!(
+            guarded(json!({"translate": "chat.type.text", "with": ["a", "b"]})),
+            "<a> b"
+        );
+        // Arguments, siblings and lists are guarded too.
+        assert_eq!(
+            guarded(
+                json!({"translate": "chat.type.text", "with": [{"translate": "horizon.options.controller"}, "b"]})
+            ),
+            "<horizon.options.controller> b"
+        );
+        assert_eq!(
+            guarded(json!({"text": "", "extra": [{"translate": "horizon.options.controller"}]})),
+            "horizon.options.controller"
+        );
+        assert_eq!(
+            guarded(json!(["", {"translate": "horizon.options.controller"}])),
+            "horizon.options.controller"
+        );
+        // A missing key takes the fallback as its pattern, as vanilla's getOrDefault does.
+        assert_eq!(
+            guarded(
+                json!({"translate": "horizon.options.controller", "fallback": "F %s", "with": ["x"]})
+            ),
+            "F x"
+        );
+        assert_eq!(
+            guarded(json!({"translate": "block.minecraft.stone", "fallback": "F"})),
+            "Stone"
+        );
+        // A vanilla key mapping names its default key, never the player's binding; a mapping
+        // vanilla lacks (no vanilla string) shows its name, as vanilla shows an unknown one.
+        assert_eq!(guarded(json!({"keybind": "key.jump"})), "Space");
+        assert_eq!(guarded(json!({"keybind": "key.forward"})), "W");
+        assert_eq!(guarded(json!({"keybind": "key.friends"})), "key.friends");
+        assert_eq!(
+            guarded(json!({"keybind": "key.horizon.zoom"})),
+            "key.horizon.zoom"
+        );
+        // Outside the guard Horizon's own resolution is unchanged.
+        assert_eq!(plain(json!({"keybind": "key.jump"})), "Jump");
+        // A guarded call leaves the next unguarded one alone.
+        assert_eq!(
+            plain(json!({"translate": "horizon.options.controller"})),
+            "Controller"
+        );
+        let name = horizon_world::nbt::Tag::compound([(
+            "translate",
+            horizon_world::nbt::Tag::String("horizon.options.controller".into()),
+        )]);
+        assert_eq!(
+            name_text_guarded(&name).plain(),
+            "horizon.options.controller"
+        );
+        assert_eq!(name_text(&name).plain(), "Controller");
     }
 }

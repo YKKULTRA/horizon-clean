@@ -215,7 +215,15 @@ fn component_text(tag: &Tag) -> String {
                 _ => s,
             }
         }
-        // Component.getString: translations and key binds resolved.
+        // Component.getString: translations and key binds resolved. The editor sends these lines
+        // back to the server, so with the Exploit Preventer on they resolve as vanilla's would.
+        Tag::Compound(_) if horizon_client_core::exploit_guard::enabled() => {
+            horizon_client_core::component::to_text_guarded(
+                &crate::scoreboard::tag_to_json(tag),
+                &mut |s| horizon_client_core::text::Text::literal(s),
+            )
+            .plain()
+        }
         Tag::Compound(_) => {
             crate::scoreboard::comp_text(&crate::scoreboard::tag_to_json(tag)).plain()
         }
@@ -274,5 +282,31 @@ mod tests {
             ..SignText::default()
         };
         assert_eq!(red.dark_color(), 0x660000);
+    }
+    /// The sign translation exploit: a server's sign naming Horizon's own string (or a mod's)
+    /// reads back as the key, as from a vanilla client, while the Exploit Preventer is on (its
+    /// default).
+    #[test]
+    fn a_servers_sign_never_reads_back_horizons_strings() {
+        let line = |c: Tag| {
+            Tag::List(vec![
+                c,
+                Tag::String("".into()),
+                Tag::String("".into()),
+                Tag::String("".into()),
+            ])
+        };
+        let side = |c: Tag| Tag::compound([("messages", line(c))]);
+        let probe = Tag::compound([(
+            "translate",
+            Tag::String("horizon.options.controller".into()),
+        )]);
+        let keybind = Tag::compound([("keybind", Tag::String("key.horizon.zoom".into()))]);
+        let tag = Tag::compound([("front_text", side(probe)), ("back_text", side(keybind))]);
+        let mut decoded = SignData::default();
+        decoded.decode(&tag);
+        assert!(horizon_client_core::exploit_guard::enabled());
+        assert_eq!(decoded.front.lines[0], "horizon.options.controller");
+        assert_eq!(decoded.back.lines[0], "key.horizon.zoom");
     }
 }

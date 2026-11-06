@@ -176,8 +176,15 @@ pub fn is_valid_repair_item(
 pub fn increased_repair_cost(cost: u32) -> u32 {
     (u64::from(cost) * 2 + 1).min(i32::MAX as u64) as u32
 }
-/// The display name the rename box starts with (`getHoverName`).
+/// The display name the rename box starts with (`getHoverName`). The box's text goes to the
+/// server, so with the Exploit Preventer on a component name resolves as a vanilla client's.
 pub fn hover_name(names: &dyn Fn(&str) -> String, stack: &ItemStack) -> String {
+    if horizon_client_core::exploit_guard::enabled() {
+        return stack
+            .custom_name_guarded()
+            .or_else(|| stack.item_name_guarded())
+            .unwrap_or_else(|| names(&stack.item));
+    }
     stack
         .custom_name()
         .or_else(|| stack.item_name())

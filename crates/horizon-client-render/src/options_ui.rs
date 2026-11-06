@@ -2345,7 +2345,8 @@ impl OptionsUi {
                                 Page::SplitSetup
                             },
                         ),
-                        None,
+                        // Horizon Clean: on by default.
+                        Some(self.extra_button(s, crate::extras::Item::ExploitPreventer)),
                     ),
                     // No AI hides the AI Agent page and everything AI.
                     Row::Buttons(

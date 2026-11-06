@@ -52,7 +52,12 @@ pub enum Progress {
     RequestFinished(bool),
 }
 
-type Job = (Vec<Request>, Vec<(&'static str, String)>, Sender<Progress>);
+type Job = (
+    Vec<Request>,
+    Vec<(&'static str, String)>,
+    Sender<Progress>,
+    Option<String>,
+);
 
 /// `DownloadQueue`: batches download in order, on one thread.
 pub struct Queue {
@@ -68,9 +73,14 @@ impl Queue {
         std::thread::Builder::new()
             .name("download-queue".into())
             .spawn(move || {
-                for (requests, headers, progress) in todo {
+                for (requests, headers, progress, server) in todo {
+                    // The Exploit Preventer: a server's packs reach this computer or its network
+                    // only when the server is there too.
+                    let public_only = server
+                        .as_deref()
+                        .is_some_and(|s| !horizon_client_core::exploit_guard::host_is_local(s));
                     if finished
-                        .send(run(&dir, &requests, &headers, &progress))
+                        .send(run(&dir, &requests, &headers, &progress, public_only))
                         .is_err()
                     {
                         break;
@@ -79,13 +89,16 @@ impl Queue {
             })?;
         Ok(Self { jobs, done })
     }
+    /// `server`: with the Exploit Preventer on, the address of the server that sent the packs
+    /// (none: no limit, as with the switch off or single player's own packs).
     pub fn download(
         &self,
         requests: Vec<Request>,
         headers: Vec<(&'static str, String)>,
         progress: Sender<Progress>,
+        server: Option<String>,
     ) {
-        let _ = self.jobs.send((requests, headers, progress));
+        let _ = self.jobs.send((requests, headers, progress, server));
     }
     /// The batches finished since the last call.
     pub fn finished(&self) -> Vec<Batch> {
@@ -93,18 +106,28 @@ impl Queue {
     }
 }
 
-/// `DownloadQueue.runDownload`: each pack into `<dir>/<id>/`, logged.
+/// `DownloadQueue.runDownload`: each pack into `<dir>/<id>/`, logged. `public_only`: no
+/// connection to a local address (`exploit_guard::resolve_public`).
 fn run(
     dir: &Path,
     requests: &[Request],
     headers: &[(&'static str, String)],
     progress: &Sender<Progress>,
+    public_only: bool,
 ) -> Batch {
     let mut batch = Batch::default();
     for request in requests {
         let id = horizon_protocol::crypto::uuid_string(request.id);
         let _ = progress.send(Progress::RequestStart);
-        let result = download_file(&dir.join(&id), request, headers, MAX_SIZE, progress);
+        let result = download_file_within(
+            &dir.join(&id),
+            request,
+            headers,
+            MAX_SIZE,
+            progress,
+            NET_TIMEOUT,
+            public_only,
+        );
         let _ = progress.send(Progress::RequestFinished(result.is_ok()));
         // DownloadQueue.LogEntry, its fields in the codec's order.
         let mut entry = vec![
@@ -200,9 +223,19 @@ pub fn download_file(
     max_size: u64,
     progress: &Sender<Progress>,
 ) -> Result<PathBuf, String> {
-    download_file_within(dir, request, headers, max_size, progress, NET_TIMEOUT)
+    download_file_within(
+        dir,
+        request,
+        headers,
+        max_size,
+        progress,
+        NET_TIMEOUT,
+        false,
+    )
 }
-/// `download_file` with the connect and read timeout given.
+/// `download_file` with the connect and read timeout given. `public_only`: every connection
+/// (the URL's and each redirect's) goes only to addresses outside this computer and its network,
+/// as the resolver decides before anything connects.
 fn download_file_within(
     dir: &Path,
     request: &Request,
@@ -210,6 +243,7 @@ fn download_file_within(
     max_size: u64,
     progress: &Sender<Progress>,
     timeout: std::time::Duration,
+    public_only: bool,
 ) -> Result<PathBuf, String> {
     let target = request.sha1.as_ref().map(|sha1| dir.join(sha1));
     if let (Some(target), Some(sha1)) = (&target, &request.sha1) {
@@ -234,11 +268,13 @@ fn download_file_within(
             })
             .map_err(|e| format!("Failed to remove existing file {}: {e}", target.display()))?;
     }
-    let mut call = ureq::AgentBuilder::new()
+    let mut agent = ureq::AgentBuilder::new()
         .timeout_connect(timeout)
-        .timeout_read(timeout)
-        .build()
-        .get(&request.url);
+        .timeout_read(timeout);
+    if public_only {
+        agent = agent.resolver(horizon_client_core::exploit_guard::resolve_public);
+    }
+    let mut call = agent.build().get(&request.url);
     for (name, value) in headers {
         call = call.set(name, value);
     }
@@ -514,10 +550,112 @@ mod tests {
             MAX_SIZE,
             &channel().0,
             std::time::Duration::from_millis(300),
+            false,
         );
         assert!(result.is_err());
         assert!(started.elapsed() < std::time::Duration::from_secs(10));
         drop(release);
+        server.join().unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The Exploit Preventer: a pack URL pointing into this computer (or a name resolving
+    /// there) never gets a connection, and the same request works without the limit.
+    #[test]
+    fn a_public_only_download_never_connects_to_a_local_address() {
+        let dir = scratch();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        for url in [
+            format!("http://127.0.0.1:{port}/pack.zip"),
+            format!("http://localhost:{port}/pack.zip"),
+            format!("http://[::ffff:127.0.0.1]:{port}/pack.zip"),
+        ] {
+            let request = Request {
+                id: 11,
+                url: url.clone(),
+                sha1: None,
+            };
+            let err = download_file_within(
+                &dir,
+                &request,
+                &[],
+                MAX_SIZE,
+                &channel().0,
+                NET_TIMEOUT,
+                true,
+            )
+            .unwrap_err();
+            assert!(err.contains("Exploit Preventer"), "{url}: {err}");
+            assert!(
+                matches!(listener.accept(), Err(e) if e.kind() == io::ErrorKind::WouldBlock),
+                "{url} reached the local listener"
+            );
+        }
+        let (url, server) = serve("200 OK", b"zip".to_vec());
+        let request = Request {
+            id: 12,
+            url,
+            sha1: None,
+        };
+        assert!(
+            download_file_within(
+                &dir,
+                &request,
+                &[],
+                MAX_SIZE,
+                &channel().0,
+                NET_TIMEOUT,
+                false
+            )
+            .is_ok()
+        );
+        server.join().unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The queue decides the limit from the server's address: a remote server's packs can't
+    /// reach a local one, a local server's can.
+    #[test]
+    fn the_queue_limits_a_remote_servers_packs_only() {
+        let dir = scratch();
+        let queue = Queue::open(dir.clone()).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/pack.zip", listener.local_addr().unwrap());
+        let wait = |queue: &Queue| loop {
+            if let Some(b) = queue.finished().pop() {
+                break b;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        queue.download(
+            vec![Request {
+                id: 21,
+                url,
+                sha1: None,
+            }],
+            Vec::new(),
+            channel().0,
+            Some("8.8.8.8:25565".into()),
+        );
+        let batch = wait(&queue);
+        assert_eq!(batch.failed, vec![21]);
+        assert!(matches!(listener.accept(), Err(e) if e.kind() == io::ErrorKind::WouldBlock));
+        let (url, server) = serve("200 OK", b"zip".to_vec());
+        queue.download(
+            vec![Request {
+                id: 22,
+                url,
+                sha1: None,
+            }],
+            Vec::new(),
+            channel().0,
+            Some("127.0.0.1:25565".into()),
+        );
+        let batch = wait(&queue);
+        assert_eq!(batch.downloaded.len(), 1);
         server.join().unwrap();
         fs::remove_dir_all(dir).unwrap();
     }
@@ -537,6 +675,7 @@ mod tests {
             }],
             Vec::new(),
             progress,
+            None,
         );
         let batch = loop {
             if let Some(b) = queue.finished().pop() {

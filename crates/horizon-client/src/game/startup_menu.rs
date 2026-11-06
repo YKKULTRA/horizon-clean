@@ -404,6 +404,7 @@ impl Loading {
         self.restart_menu_resources()
     }
     pub(super) fn apply_menu_settings(&mut self) {
+        horizon_client::exploit_guard::set_enabled(self.settings.extras.exploit_preventer);
         if let Some(renderer) = &mut self.renderer {
             renderer.gamma = self.settings.gamma;
             renderer.set_present_mode(self.settings.vsync, self.settings.horizon.present_mode);

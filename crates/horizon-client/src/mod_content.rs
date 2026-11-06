@@ -2249,13 +2249,26 @@ pub fn resource_root(base: &Path, mods: &[ContentMod], cache: &Path) -> Result<P
         // A reused root warns as the build did.
         let warnings = fs::read_to_string(out.join(WARNINGS)).unwrap_or_default();
         warnings.lines().for_each(|w| log::warn!("Horizon: {w}"));
+        write_base(base, &out);
         return Ok(out);
     }
     for warning in build(base, mods, &out)? {
         log::warn!("Horizon: {warning}");
     }
     fs::write(out.join(STAMP), stamp)?;
+    write_base(base, &out);
     Ok(out)
+}
+
+/// The root a content root was built over, for the strings a vanilla client would have
+/// (`lang::CONTENT_BASE`, the Exploit Preventer).
+fn write_base(base: &Path, out: &Path) {
+    if let Some(base) = std::path::absolute(base)
+        .ok()
+        .and_then(|b| b.to_str().map(str::to_owned))
+    {
+        let _ = fs::write(out.join(horizon_client_core::lang::CONTENT_BASE), base);
+    }
 }
 
 /// In a root built by [`build`]: its warnings, one per line.

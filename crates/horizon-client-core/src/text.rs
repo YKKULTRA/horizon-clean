@@ -232,7 +232,15 @@ impl Text {
     }
     /// Component.translatable(key, args) in the current language.
     pub fn translate(key: &str, args: &[Text]) -> Self {
-        let mut t = format_translation(&lang::get(key), args);
+        Self::translate_from(key, lang::get(key), args)
+    }
+    /// `translate` as a vanilla client with the same resource packs shows it: Horizon's and the
+    /// mods' strings left out (`exploit_guard`).
+    pub fn translate_vanilla(key: &str, args: &[Text]) -> Self {
+        Self::translate_from(key, lang::get_vanilla(key), args)
+    }
+    pub(crate) fn translate_from(key: &str, pattern: String, args: &[Text]) -> Self {
+        let mut t = format_translation(&pattern, args);
         let mut c = Map::new();
         c.insert("translate".into(), key.into());
         if !args.is_empty() {

@@ -918,10 +918,11 @@ fn receive_brand(payload: &cfg::CustomPayload, send: &Sender<Event>) {
     }
 }
 
-/// The minecraft:brand payload: a string naming the client.
+/// The minecraft:brand payload: a string naming the client (`vanilla` with the Exploit
+/// Preventer on, as an unmodified client says).
 fn brand() -> Vec<u8> {
     let mut w = horizon_protocol::buf::Writer::new();
-    w.string("horizon");
+    w.string(horizon_client_core::exploit_guard::client_brand());
     w.data
 }
 

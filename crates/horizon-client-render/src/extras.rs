@@ -114,10 +114,14 @@ pub struct Extras {
     /// Agents may control the game the player starts: it opens its control socket for
     /// horizon-ctl and MCP clients (off by default; an agent's own launch always opens it).
     pub agent_control: bool,
-    /// "Playing Horizon" on the player's Discord profile (`discord_presence`; on by default).
+    /// "Playing Horizon" on the player's Discord profile (`discord_presence`; off by default in
+    /// Horizon Clean: it tells Discord friends the game is Horizon).
     pub discord_presence: bool,
     /// Another controller can join P1's world (`splitscreen`, off by default).
     pub splitscreen: bool,
+    /// Exploit Preventer (`exploit_guard`, Horizon Clean): servers learn nothing a vanilla
+    /// client wouldn't tell them. On by default.
+    pub exploit_preventer: bool,
 }
 impl Default for Extras {
     fn default() -> Self {
@@ -151,8 +155,9 @@ impl Default for Extras {
             sort_key: "key.keyboard.unknown".into(),
             no_ai: false,
             agent_control: false,
-            discord_presence: true,
+            discord_presence: false,
             splitscreen: false,
+            exploit_preventer: true,
         }
     }
 }
@@ -230,6 +235,7 @@ impl Extras {
                 "agentControl" => e.agent_control = flag(e.agent_control),
                 "discordPresence" => e.discord_presence = flag(e.discord_presence),
                 "splitscreen" => e.splitscreen = flag(e.splitscreen),
+                "exploitPreventer" => e.exploit_preventer = flag(e.exploit_preventer),
                 _ => {}
             }
         }
@@ -237,7 +243,7 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\n{}:{}\nagentControl:{}\ndiscordPresence:{}\nsplitscreen:{}\n",
+            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\n{}:{}\nagentControl:{}\ndiscordPresence:{}\nsplitscreen:{}\nexploitPreventer:{}\n",
             bool_text(self.fullbright),
             bool_text(self.dynamic_lights),
             bool_text(self.zoom),
@@ -274,6 +280,7 @@ impl Extras {
             bool_text(self.agent_control),
             bool_text(self.discord_presence),
             bool_text(self.splitscreen),
+            bool_text(self.exploit_preventer),
         )
     }
     /// Binds the extra key `name` (`SORT_KEY`); false for
@@ -407,6 +414,8 @@ pub enum Item {
     DiscordPresence,
     /// On the Splitscreen settings page.
     Splitscreen,
+    /// On the Horizon Settings page (Horizon Clean).
+    ExploitPreventer,
 }
 /// The Extras page: headers and items.
 pub fn rows() -> Vec<Result<Item, &'static str>> {
@@ -444,6 +453,7 @@ impl Item {
             Item::AgentControl => "Agent Control",
             Item::DiscordPresence => "Discord Rich Presence",
             Item::Splitscreen => "Splitscreen",
+            Item::ExploitPreventer => "Exploit Preventer",
         }
     }
     /// The switch this setting belongs to: it does nothing while that is off.
@@ -454,7 +464,7 @@ impl Item {
             MouseTweaksWheel => MouseTweaks,
             SortKey => Sort,
             Fullbright | DynamicLights | OwnNameTag | MouseTweaks | Sort | AutoReconnect | NoAi
-            | AgentControl | DiscordPresence | Splitscreen => {
+            | AgentControl | DiscordPresence | Splitscreen | ExploitPreventer => {
                 return None;
             }
         })
@@ -499,6 +509,9 @@ impl Item {
             Item::AgentControl => {
                 "Your own AI agent can play this game through horizon-ctl or an MCP client, on this computer only."
             }
+            Item::ExploitPreventer => {
+                "Servers see a vanilla client: the brand says vanilla, signs and anvils read back only vanilla's text and default keys, and server resource packs can't reach your computer or local network. Each account keeps its own pack cache."
+            }
         }
     }
     /// The frame-time cost the main switch of an extra shows.
@@ -531,6 +544,7 @@ impl Item {
             Item::AgentControl => e.agent_control,
             Item::DiscordPresence => e.discord_presence,
             Item::Splitscreen => e.splitscreen,
+            Item::ExploitPreventer => e.exploit_preventer,
             _ => return None,
         })
     }
@@ -560,6 +574,7 @@ impl Item {
             Item::AgentControl => e.agent_control = !e.agent_control,
             Item::DiscordPresence => e.discord_presence = !e.discord_presence,
             Item::Splitscreen => e.splitscreen = !e.splitscreen,
+            Item::ExploitPreventer => e.exploit_preventer = !e.exploit_preventer,
             Item::SortKey => {}
         }
     }
@@ -582,9 +597,19 @@ mod tests {
         assert!(!d.fullbright && !d.dynamic_lights);
         assert!(!d.zoom && !d.fps && !d.keystrokes && !d.minimap && !d.auto_reconnect);
         assert!(!d.mouse_tweaks && !d.sort && !d.own_name_tag && !d.ui_sound_reserve);
-        assert!(d.discord_presence);
+        // Horizon Clean: no "Playing Horizon" on Discord, and the Exploit Preventer on.
+        assert!(!d.discord_presence);
+        assert!(d.exploit_preventer);
+        assert_eq!(Item::ExploitPreventer.switch(&d), Some(true));
         assert_eq!(Extras::parse(""), d);
         assert_eq!(Extras::parse(&d.serialize()), d);
+        let mut off = d.clone();
+        Item::ExploitPreventer.cycle(&mut off, false);
+        assert!(!off.exploit_preventer);
+        assert!(off.serialize().contains("exploitPreventer:false\n"));
+        assert_eq!(Extras::parse(&off.serialize()), off);
+        assert!(!Extras::parse("exploitPreventer:false").exploit_preventer);
+        assert!(Extras::parse("exploitPreventer:maybe").exploit_preventer);
         let mut e = d.clone();
         Item::Fullbright.cycle(&mut e, false);
         assert_eq!(Item::Fullbright.switch(&e), Some(true));
@@ -611,7 +636,7 @@ mod tests {
         e.mouse_tweaks_wheel = false;
         e.sort = true;
         e.sort_key = "key.keyboard.r".into();
-        e.discord_presence = false;
+        e.discord_presence = true;
         assert!(!e.splitscreen);
         Item::Splitscreen.cycle(&mut e, false);
         assert_eq!(Item::Splitscreen.switch(&e), Some(true));

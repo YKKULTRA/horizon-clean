@@ -85,6 +85,13 @@ pub(super) struct ServerPackState {
     packs: ServerPacks,
     /// `downloads/` in the game folder, opened at the first download.
     queue: Option<download::Queue>,
+    /// The folder `queue` downloads into: `downloads/`, or with the Exploit Preventer on
+    /// `downloads/<account UUID>/`, so a server can't recognise one player across accounts by
+    /// the packs already cached.
+    queue_dir: Option<PathBuf>,
+    /// The address joined (none: single player's own server): with the Exploit Preventer on its
+    /// packs may reach local addresses only when it is local itself.
+    server: Option<String>,
     pub(super) prompt: Option<PackPrompt>,
     /// The server list entry the setting is saved to (none: a direct join).
     pub(super) address: Option<String>,
@@ -233,6 +240,7 @@ impl Game<'_> {
         state.user = user;
         state.prompt = None;
         state.notifiers.clear();
+        state.server = address.map(str::to_owned);
         let Some(address) = address else {
             state.address = None;
             state.packs.local_world();
@@ -380,13 +388,23 @@ impl Game<'_> {
         }
     }
     fn start_pack_downloads(&mut self, requests: Vec<horizon_client::server_packs::Request>) {
+        let guarded = horizon_client::exploit_guard::enabled();
         let state = &mut self.server_packs;
+        let mut dir = std::env::current_dir()
+            .unwrap_or_default()
+            .join("downloads");
+        if guarded {
+            dir = dir.join(format!("{:032x}", state.user.1));
+        }
+        if state.queue_dir.as_ref() != Some(&dir) {
+            state.queue = None;
+        }
         if state.queue.is_none() {
-            let dir = std::env::current_dir()
-                .unwrap_or_default()
-                .join("downloads");
-            match download::Queue::open(dir) {
-                Ok(queue) => state.queue = Some(queue),
+            match download::Queue::open(dir.clone()) {
+                Ok(queue) => {
+                    state.queue = Some(queue);
+                    state.queue_dir = Some(dir);
+                }
                 Err(e) => {
                     log::error!("Horizon: failed to open the download queue: {e}");
                     // Every request failed, as the notifier would hear it.
@@ -413,7 +431,8 @@ impl Game<'_> {
             .notifiers
             .push(PackNotifier::new(events, requests.len()));
         if let Some(queue) = &state.queue {
-            queue.download(requests, headers, progress);
+            let server = if guarded { state.server.clone() } else { None };
+            queue.download(requests, headers, progress, server);
         }
     }
     /// `DownloadedPackSource.startReload`: the packs on top of the player's

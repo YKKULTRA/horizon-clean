@@ -905,8 +905,9 @@ fn login_and_configure(
             data: {
                 let mut w = horizon_protocol::buf::Writer::new();
                 // MinecraftServer.getServerModName: "vanilla" there; a modded
-                // server names itself, and Horizon's says "horizon", as its client does.
-                w.string("horizon");
+                // server names itself, and Horizon's says "horizon", as its client does
+                // ("vanilla" too with the Exploit Preventer on).
+                w.string(horizon_client_core::exploit_guard::client_brand());
                 w.data
             },
         }),

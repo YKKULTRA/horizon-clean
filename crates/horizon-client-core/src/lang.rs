@@ -30,8 +30,15 @@ pub struct Language {
     /// right to left (`ClientLanguage.defaultRightToLeft`).
     bidirectional: bool,
     map: HashMap<String, String>,
+    /// What a vanilla client with the same resource packs has: `map` without Horizon's own
+    /// strings and without a content root's mods (`ResourceSource::vanilla_base`). Text a server
+    /// can read back resolves with this while the Exploit Preventer is on (`exploit_guard`).
+    vanilla: HashMap<String, String>,
 }
 pub const DEFAULT: &str = "en_us";
+/// In a content root (`mod_content::resource_root`): the root it was built over, the resource
+/// packs and vanilla without the mods.
+pub const CONTENT_BASE: &str = "horizon-mod-content.base";
 
 static CURRENT: RwLock<Option<Arc<Language>>> = RwLock::new(None);
 /// The current language's `bidirectional`, read for every drawn string.
@@ -47,6 +54,11 @@ pub trait ResourceSource {
     /// The namespaces under `assets/` (resource packs may add their own).
     fn namespaces(&self) -> Vec<String> {
         vec!["minecraft".into()]
+    }
+    /// For a content root: the root it was built over (`CONTENT_BASE`), which a vanilla client
+    /// would read instead.
+    fn vanilla_base(&self) -> Option<std::path::PathBuf> {
+        None
     }
 }
 /// Horizon's own strings, compiled in so they need no prepared resources.
@@ -105,6 +117,11 @@ impl ResourceSource for std::path::PathBuf {
             .filter_map(|e| e.file_name().to_str().map(str::to_owned))
             .collect()
     }
+    fn vanilla_base(&self) -> Option<std::path::PathBuf> {
+        let base = std::fs::read_to_string(self.join(CONTENT_BASE)).ok()?;
+        let base = std::path::PathBuf::from(base.trim_end_matches(['\n', '\r']));
+        base.is_dir().then_some(base)
+    }
 }
 
 /// DeprecatedTranslationsInfo.applyToMap: drop removed keys, then move each
@@ -131,12 +148,40 @@ pub fn apply_deprecated(map: &mut HashMap<String, String>, json: &[u8]) {
     }
 }
 
+/// Every source's `lang/<code>.json` in every namespace, the codes in order and the sources in
+/// priority order (later ones override), then the game's own `deprecated.json`.
+fn layered(sources: &[&dyn ResourceSource], codes: &[&str]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let namespaces: std::collections::BTreeSet<String> =
+        sources.iter().flat_map(|s| s.namespaces()).collect();
+    for c in codes {
+        for namespace in &namespaces {
+            for source in sources {
+                let Some(bytes) = source.read(&format!("assets/{namespace}/lang/{c}.json")) else {
+                    continue;
+                };
+                if let Ok(entries) = serde_json::from_slice::<HashMap<String, String>>(&bytes) {
+                    map.extend(entries);
+                }
+            }
+        }
+    }
+    // DeprecatedTranslationsInfo.loadFromDefaultResource().applyToMap: the
+    // game's own deprecated.json, not a resource pack's.
+    if let Some(bytes) = sources
+        .iter()
+        .find_map(|s| s.read("assets/minecraft/lang/deprecated.json"))
+    {
+        apply_deprecated(&mut map, &bytes);
+    }
+    map
+}
+
 impl Language {
     /// ClientLanguage.loadFrom: en_us first, then the selected language, each
     /// from every namespace and every source in priority order (later sources
     /// override).
     pub fn load(sources: &[&dyn ResourceSource], code: &str) -> Self {
-        let mut map = HashMap::new();
         let mut codes = vec![DEFAULT];
         if code != DEFAULT {
             codes.push(code);
@@ -146,41 +191,36 @@ impl Language {
         let bundled = Bundled;
         let mut all: Vec<&dyn ResourceSource> = vec![&bundled];
         all.extend_from_slice(sources);
-        let sources = all.as_slice();
-        let namespaces: std::collections::BTreeSet<String> =
-            sources.iter().flat_map(|s| s.namespaces()).collect();
-        for c in codes {
-            for namespace in &namespaces {
-                for source in sources {
-                    let Some(bytes) = source.read(&format!("assets/{namespace}/lang/{c}.json"))
-                    else {
-                        continue;
-                    };
-                    if let Ok(entries) = serde_json::from_slice::<HashMap<String, String>>(&bytes) {
-                        map.extend(entries);
-                    }
-                }
-            }
-        }
-        // DeprecatedTranslationsInfo.loadFromDefaultResource().applyToMap: the
-        // game's own deprecated.json, not a resource pack's.
-        if let Some(bytes) = sources
+        let map = layered(&all, &codes);
+        // A vanilla client with the same packs: no Horizon strings, and a content root read as
+        // the root its mods were added to.
+        let bases: Vec<Option<std::path::PathBuf>> =
+            sources.iter().map(|s| s.vanilla_base()).collect();
+        let vanilla_sources: Vec<&dyn ResourceSource> = sources
             .iter()
-            .find_map(|s| s.read("assets/minecraft/lang/deprecated.json"))
-        {
-            apply_deprecated(&mut map, &bytes);
-        }
-        let bidirectional = available(sources)
+            .zip(&bases)
+            .map(|(source, base)| match base {
+                Some(base) => base as &dyn ResourceSource,
+                None => *source,
+            })
+            .collect();
+        let vanilla = layered(&vanilla_sources, &codes);
+        let bidirectional = available(&all)
             .iter()
             .any(|info| info.code == code && info.bidirectional);
         Self {
             code: code.to_owned(),
             bidirectional,
             map,
+            vanilla,
         }
     }
     pub fn get(&self, key: &str) -> Option<&str> {
         self.map.get(key).map(String::as_str)
+    }
+    /// The translation a vanilla client with the same resource packs has, if any.
+    pub fn get_vanilla(&self, key: &str) -> Option<&str> {
+        self.vanilla.get(key).map(String::as_str)
     }
     /// The resolved map, for `horizon_protocol::text::plain`: a server's
     /// components carry keys, and the network layer resolves them with this.
@@ -264,6 +304,16 @@ pub fn get_or(key: &str, fallback: &str) -> String {
 }
 pub fn has(key: &str) -> bool {
     current().is_some_and(|l| l.get(key).is_some())
+}
+/// Language.getOrDefault as a vanilla client with the same resource packs answers it: Horizon's
+/// and the mods' strings left out (`exploit_guard`).
+pub fn get_vanilla(key: &str) -> String {
+    current()
+        .and_then(|l| l.get_vanilla(key).map(str::to_owned))
+        .unwrap_or_else(|| key.to_owned())
+}
+pub fn has_vanilla(key: &str) -> bool {
+    current().is_some_and(|l| l.get_vanilla(key).is_some())
 }
 /// I18n.get with plain string arguments.
 pub fn tr(key: &str, args: &[&dyn std::fmt::Display]) -> String {
@@ -367,5 +417,63 @@ mod tests {
             langs.iter().map(|l| l.code.as_str()).collect::<Vec<_>>(),
             ["en_us", "fr_fr"]
         );
+    }
+
+    #[test]
+    fn the_vanilla_view_leaves_horizon_strings_out_and_keeps_packs() {
+        let base = Mem(HashMap::from([(
+            "assets/minecraft/lang/en_us.json".into(),
+            br#"{"a":"Apple","key.jump":"Jump"}"#.to_vec(),
+        )]));
+        let pack = Mem(HashMap::from([(
+            "assets/minecraft/lang/en_us.json".into(),
+            br#"{"server.pack.key":"From the pack"}"#.to_vec(),
+        )]));
+        let sources: [&dyn ResourceSource; 2] = [&base, &pack];
+        let en = Language::load(&sources, "en_us");
+        assert_eq!(en.get("horizon.options.controller"), Some("Controller"));
+        assert_eq!(en.get_vanilla("horizon.options.controller"), None);
+        assert_eq!(en.get_vanilla("a"), Some("Apple"));
+        assert_eq!(en.get_vanilla("server.pack.key"), Some("From the pack"));
+        assert_eq!(en.get_vanilla("key.jump"), Some("Jump"));
+    }
+
+    #[test]
+    fn a_content_root_reads_as_its_base_for_the_vanilla_view() {
+        let dir = std::env::temp_dir().join(format!(
+            "horizon-lang-content-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let base = dir.join("base");
+        let content = dir.join("content");
+        let write = |path: std::path::PathBuf, body: &str| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        };
+        write(
+            base.join("assets/minecraft/lang/en_us.json"),
+            r#"{"a":"Apple"}"#,
+        );
+        // The mods add keys of their own and one in vanilla's namespace.
+        write(
+            content.join("assets/minecraft/lang/en_us.json"),
+            r#"{"a":"Apple","mod.in.minecraft":"Mod"}"#,
+        );
+        write(
+            content.join("assets/ruby/lang/en_us.json"),
+            r#"{"item.ruby.ruby":"Ruby"}"#,
+        );
+        write(content.join(CONTENT_BASE), base.to_str().unwrap());
+        let en = Language::load(&[&content], "en_us");
+        assert_eq!(en.get("item.ruby.ruby"), Some("Ruby"));
+        assert_eq!(en.get("mod.in.minecraft"), Some("Mod"));
+        assert_eq!(en.get_vanilla("item.ruby.ruby"), None);
+        assert_eq!(en.get_vanilla("mod.in.minecraft"), None);
+        assert_eq!(en.get_vanilla("a"), Some("Apple"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

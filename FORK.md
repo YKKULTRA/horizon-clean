@@ -26,6 +26,26 @@ In the launcher:
 - Hardware probing and memory sampling in ordinary sessions (a benchmark you start still measures, locally).
 - Every game it launches gets `HORIZON_TELEMETRY_URL=off` and `HORIZON_NO_HEARTBEAT=1`, after per-instance overrides, so even an unmodified upstream build stays silent.
 
+## Exploit Preventer (on by default)
+
+A switch on the Horizon Settings page (`exploitPreventer` in `horizon-extras.txt`). With it on, a server learns what an unmodified vanilla client would tell it, and nothing else:
+
+- **Sign translation exploit** (MC-265322, the fix NikOverflow's [ExploitPreventer](https://github.com/NikOverflow/ExploitPreventer) makes for the Java game). A server can put translation keys and key binds on a sign or an item's name, then read back what the client resolved through the sign editor or the anvil's rename box. Those lines now resolve only from vanilla's own strings and your resource packs': Horizon's and mods' strings come back as their keys, as from a vanilla client. A `keybind` component names vanilla's default key for a vanilla key mapping (never your own binding), and anything else comes back as its name.
+- **Brand:** the client says `vanilla` in `minecraft:brand` instead of `horizon`, and so does a LAN world it hosts.
+- **Local requests through resource packs:** a remote server's resource pack (and every redirect, and any DNS name) may not connect to this computer or its local network: loopback, private and link-local ranges, IPv6 unique-local, 100.64.0.0/10 (Tailscale and carrier NAT). The check is in the resolver, so nothing connects before it. A server on your own computer or network may still use local URLs.
+- **Fingerprinting through the pack cache:** each account downloads server packs into its own `downloads/<account UUID>/`, so a server can't recognise you across accounts by what is already cached.
+
+Also changed: Discord Rich Presence ("Playing Horizon" on your profile) is off by default; turn it on in Horizon Settings.
+
+With the switch on, Horizon-only features that look at the brand don't see a Horizon client: a Horizon LAN host treats you as vanilla (no native-mod messages, no quiet commands from it), and a host with "Horizon clients only" turns you away. Turn the switch off for those.
+
+Not covered yet, so a server can still tell Horizon from vanilla in these ways:
+
+- Configuration's known packs: Horizon answers that it knows none and asks for every registry entry in full; vanilla says it knows `minecraft:core`.
+- Behaviour that differs from vanilla anywhere else (timing, packet order, physics edge cases). Horizon aims at vanilla parity, but parity is not proven against an anticheat.
+- Plugin channels a mod registers on purpose (as with the Java mod, these are left alone).
+- Saved worlds record `horizon` among their server brands in `level.dat`.
+
 ## What still uses the network
 
 Only what you use: Microsoft/Xbox sign-in, Mojang assets and Java downloads, multiplayer, skins, mod registries and their CDNs, release browsing when you open it, log sharing to mclo.gs when you click it, and optional Tailscale/friends networking. Java mods and other programs you run have their own network behaviour; this fork is not a firewall.

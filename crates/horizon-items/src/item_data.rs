@@ -127,6 +127,11 @@ impl StackData {
     pub fn custom_name_plain(&self) -> Option<String> {
         self.custom_name.as_ref().and_then(read_text)
     }
+    /// `custom_name_plain` for a name a server can read back (an anvil's rename box): resolved as
+    /// a vanilla client's (`component::name_text_guarded`, the Exploit Preventer).
+    pub fn custom_name_guarded(&self) -> Option<String> {
+        self.custom_name.as_ref().and_then(read_text_guarded)
+    }
 
     /// A preserved component's saved value.
     pub fn other(&self, id: &str) -> Option<&Tag> {
@@ -326,6 +331,10 @@ impl ItemStack {
     pub fn custom_name(&self) -> Option<String> {
         self.data()?.custom_name_plain()
     }
+    /// `custom_name` resolved as a vanilla client's, for an anvil's rename box.
+    pub fn custom_name_guarded(&self) -> Option<String> {
+        self.data()?.custom_name_guarded()
+    }
     /// `ResolvableProfile.name`: a bare profile string or its `name` field.
     pub fn profile_name(&self) -> Option<String> {
         let profile = self.data()?.other("minecraft:profile")?;
@@ -338,6 +347,11 @@ impl ItemStack {
     pub fn item_name(&self) -> Option<String> {
         let name = self.data()?.other("minecraft:item_name")?;
         Some(horizon_client_core::component::name_text(name).plain())
+    }
+    /// `item_name` resolved as a vanilla client's, for an anvil's rename box.
+    pub fn item_name_guarded(&self) -> Option<String> {
+        let name = self.data()?.other("minecraft:item_name")?;
+        Some(horizon_client_core::component::name_text_guarded(name).plain())
     }
     pub fn potion(&self) -> Option<&str> {
         self.data().and_then(|d| d.potion.as_deref())
@@ -487,6 +501,16 @@ fn read_text(t: &Tag) -> Option<String> {
         // styling the rest), as servers behind ViaVersion send book pages.
         Tag::Compound(_) | Tag::List(_) => {
             Some(horizon_client_core::component::name_text(t).plain())
+        }
+        _ => None,
+    }
+}
+/// `read_text` with the component resolved as a vanilla client's (`name_text_guarded`).
+fn read_text_guarded(t: &Tag) -> Option<String> {
+    match t {
+        Tag::String(s) => Some(s.to_string_lossy()),
+        Tag::Compound(_) | Tag::List(_) => {
+            Some(horizon_client_core::component::name_text_guarded(t).plain())
         }
         _ => None,
     }

@@ -13281,6 +13281,8 @@ impl Game<'_> {
         )
     }
     fn apply_settings(&mut self) {
+        // Horizon Clean: the Exploit Preventer switch takes effect at once.
+        horizon_client::exploit_guard::set_enabled(self.settings.extras.exploit_preventer);
         // LocalPlayer.refreshChatAbilities: the chat shows what the Chat option allows.
         let abilities = self.chat_abilities();
         self.ui.chat.set_abilities(&self.gui.atlas.font, abilities);
@@ -19614,6 +19616,14 @@ pub fn run() -> Result<()> {
     }
     mods::register_components(&vanilla_root)?;
     let early_settings = Settings::load(&std::env::current_dir()?.join("options.txt"));
+    // Horizon Clean: the Exploit Preventer (on by default) and vanilla's default keys, which a
+    // server's `keybind` text names while it is on.
+    horizon_client::exploit_guard::set_enabled(early_settings.extras.exploit_preventer);
+    horizon_client::exploit_guard::set_keybind_defaults(
+        horizon_client::keybinds::MAPPINGS
+            .iter()
+            .map(|(name, default, _)| (*name, *default)),
+    );
     // Minecraft's constructor opens the narrator; a server has none.
     if options.execution_role.is_client() {
         narrator::start(&early_settings);
