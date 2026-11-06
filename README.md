@@ -1,3 +1,5 @@
+> **Horizon Clean** is an unofficial fork of [Horizon](https://github.com/horizon-rust/horizon) with all telemetry removed: the always-on "I'm playing" ping, the data-collection uploads, the player counts and the sponsor promotions. You build it yourself: see [FORK.md](FORK.md) for what changed and how. Everything below is upstream's README; its badges, downloads and links are upstream's official builds and services, not this fork.
+
 <p align="center">
   <img src="docs/media/banner.webp" alt="The Horizon website: the game you know, rebuilt in Rust" width="100%">
 </p>
